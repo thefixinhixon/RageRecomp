@@ -1,0 +1,48 @@
+RageRecomp third-party notices
+==============================
+
+This program contains no game code or game data. It runs the player's own
+MAME ROM files, which are never committed to this repository.
+
+1. Hardware behaviour reference: MAME (BSD-3-Clause)
+----------------------------------------------------
+The Atari GT memory map, CAGE audio board behaviour, RLE motion-object
+renderer, colour-RAM compositor and XGA protection behaviour implemented
+here were derived from MAME's driver sources (src/mame/atari/atarigt*,
+src/mame/atari/atarirle*, src/mame/atari/atarixga*, src/mame/shared/cage*).
+MAME is available at https://github.com/mamedev/mame under the licence below.
+
+    BSD 3-Clause License
+
+    Copyright (c) MAME contributors, All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+
+    1. Redistributions of source code must retain the above copyright notice,
+       this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in the
+       documentation and/or other materials provided with the distribution.
+
+    3. Neither the name of the copyright holder nor the names of its
+       contributors may be used to endorse or promote products derived from
+       this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+    IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+    ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+    LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+    CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+    SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+    INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+    CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
+
+2. miniz (MIT licence)
+---------------------
+src/third_party/miniz/ is the miniz ZIP/deflate library by Rich Geldreich
+et al., used to read MAME ROM zip files. See src/third_party/miniz/LICENSE.

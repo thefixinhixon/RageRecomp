@@ -1,0 +1,33 @@
+# Build output (may contain translated game code: never commit)
+build/
+build-win/
+build-lnx/
+dist/
+ragerecomp
+ragerecomp-dist
+ragerecomp.exe
+*.o
+*.so
+*.dll
+
+# Player data: ROMs, caches with translated code, states, recordings
+run/
+roms/
+cache/
+saves/
+*.zip
+*.7z
+*.settings
+*.rrs
+*.eeprom
+*.wav
+*.ppm
+*.png
+!icon-*.png
+*.log
+*.ini
+
+# Editor droppings
+*~
+.vscode/
+.idea/

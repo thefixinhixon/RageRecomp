@@ -1,0 +1,207 @@
+# RageRecomp
+
+Native port of arcade Primal Rage (Atari GT: 68EC020 + TMS320C31 CAGE),
+C11 + SDL2 + OpenGL for Linux and Windows. It runs the game's own CPU/DSP
+code, statically translated to C, with the hardware around it emulated.
+Players supply their own MAME ROMs. README.md is the user manual; this
+file is for working on the code. Conventions follow UltraCombo.
+
+## Hard rules: game data and game code
+
+The game's ROMs and code are copyrighted. This repo is public.
+
+- Never commit or ship anything made from the game files:
+  - ROM data, RAM snapshots (`build/snap/`), translated code (`build/rec/`,
+    any `rec_*.c`, `cache/`);
+  - audio recordings (`RR_WAV`), screenshots or frame dumps, save states;
+  - any binary built after `make recomp`, which links the game code in.
+- Distributable programs contain no game code. They build it on the
+  player's machine at first launch (`rec_build.c`). Release packages come
+  only from `make packages`.
+- Never `git add -A` / `git add .`: the working folder holds builds with
+  game code and test output. Add files by name and read `git status` first.
+- Name the product RageRecomp. Use "Primal Rage" only to say what it
+  plays, never as the product's name. It is a trademark.
+
+## Layout
+
+| Area | Files |
+|---|---|
+| What differs per set: names, ROM tables, CRCs, input map, DSP speedup | `game.h`, `game.c`, `game_sets.c`; picker: `main.c`, `picker.c` |
+| 68EC020: decode, interpreter, translator | `m68k.h`, `m68k_core.h`, `m68k.c`, `m68kdis.c`, `m68krec.h`, `m68krec.c` |
+| TMS320C31: decode, interpreter, translator | `c31.h`, `c31_core.h`, `c31.c`, `c31dis.c`, `c31rec.h`, `c31rec.c` |
+| Contract between program and translated code | `rec_abi.h`, `rec_gen.h` |
+| Translated code: dispatcher, maps | `rec.c/h` |
+| First-run build and cache | `rec_build.c/h`; `rec_none.c` = no linked-in code |
+| Memory map and I/O | `mem.c/h`, `machine.h` |
+| CAGE sound board: DMA, timers, serial, host comm, DAC mix | `cage.c/h`, `sound.h` |
+| GT video: tiles, alpha, RLE motion objects, composite | `gtvid.c/h` |
+| Protection (XGA 136094-0004A) | `xga.c/h` |
+| EEPROM 2816 | `eeprom.c/h` |
+| MAME zip loading, interleave, CRC checks, missing-file UX | `roms.c/h` |
+| Save states | `state.c/h` |
+| Window, menu, pacing, input | `frontend.c`, `osd.c/h`, `config.c/h` |
+| Video, OpenGL, shader presets | `video.c/h`, `shaders.c/h`, `gl_funcs.h` |
+| Icon (drawn in code) and PNG writer | `icon.c/h`, `png.c/h` |
+| Program entry, CLI, `data_dir()`/`base_dir()`/`find_data()` | `main.c` |
+| Started with a ROM path: set detection, zips unpacked into `cache/roms/` (vendored miniz), folders `find_data()` looks in first | `launch.c/h` |
+
+## Hardware model (from MAME's atarigt/cage drivers; see NOTICE)
+
+- Main CPU 68EC020 @ 25 MHz. IRQ6 = 250 Hz scanline tick, IRQ4 = vblank,
+  IRQ3 = CAGE sound. Autovectors.
+- Map: ROM 0x000000-0x1FFFFF; CAGE 0xC00000; EEPROM 0xD20000 (+unlock at
+  0xD40000); work RAM 0xD70000-0xD7FFFF (playfield tilemap at 0xD72000,
+  alpha at 0xD76000, MO params at 0xD78000, MO command at 0xD7A200);
+  colour RAM + XGA overlay 0xD80000-0xDFFFFF; latches 0xE08xxx; inputs
+  0xE80000/0xE8200x; main RAM 0xF80000-0xFFFFFF.
+- Video 336x240 @ ~59.92 Hz. 6bpp playfield (128x64, row scrolls from
+  alpha RAM), 4bpp alpha (64x32), RLE motion objects into two 16-bit
+  VRAMs, CRAM+MRAM composite with the lightning LCR override.
+- CAGE: TMS320C31 @ 33.8688 MHz (MCBL boot from boot ROM), 64K-word RAM,
+  DMA into the serial port feeding 4 DAC channels @ ~22050 Hz, mixed to
+  stereo (L = ch1+ch2, R = ch0+ch3). No subwoofer (not in MAME either).
+
+## CPU timing
+
+- The 68K runs cycle-counted; `machine_frame` interleaves CPU and DSP at
+  scanline granularity and takes the picture at vblank, as MAME draws it.
+- 68K counts follow MAME/Musashi's 020 table (`m68k_in.lst`, cache-hit
+  flavour): ALU ea-to-Dn 2, ALU/Dn-to-ea mem-dst 4, EOR Dn,Dm 2,
+  MOVE/ADDQ reg 2, LSR/LSL reg 4, LINK.W 5, RTS 10, MOVEM base 4/8 plus
+  4/2 per L/W register. Pinned by cycle asserts in `tests/t_ea.c`.
+  Shifting any hot-op cost by a cycle moves boot by frames.
+- The C31 charges MAME's counts (1 base, +3 branches/calls/rets/RPTS,
+  +4 trap). DSP DMA/timer periods are in DSP cycles off the same
+  16.9344 MHz base as MAME's H1-derived attotime values; verified equal.
+- Translated and interpreted runs must behave the same on screen; compare
+  them when changing timing. Translated code takes interrupts at block
+  boundaries, so regression hashes legitimately differ between the two;
+  what must match is every build of the same translated code.
+
+## Determinism
+
+- Emulation must be bit-identical across compilers (gcc, clang, MinGW,
+  TinyCC modules) and across linked-in vs run-time-built code.
+- `memset` any local struct before copying it into a state blob.
+- After any change to emulation, run the regression test; the hash must
+  not change. If a change is meant to alter emulation, say so and record
+  the new hash. `state_compat_id()` must differ between builds that
+  emulate differently.
+
+## Translated-code modules
+
+- `rec_abi.h`, `rec_gen.h`, `m68k_core.h`, `c31_core.h` are compiled into
+  the module **without the C library** (`REC_MODULE`, `-nostdlib`). Keep
+  them free of libc headers and calls, and make everything work under
+  TinyCC too.
+- They are embedded into the program (`tools/embed.py` →
+  `build/rec_headers.c`), so rebuilding the program picks up changes.
+- Bump `REC_ABI_VERSION` (`rec_abi.h`) when the program/module contract
+  changes, and `RECOMP_VERSION` (`rec_build.c`) when the generated C
+  changes. Both are in the cache key.
+- Compiler order at first launch: system cc/gcc/clang → TinyCC (about
+  half the speed) → interpreter. All must give the same behaviour.
+- Keep instruction semantics in `m68k_core.h` / `c31_core.h` only; the
+  interpreters and the translators share them.
+- Translated DSP code runs only where RAM still holds the words it came
+  from (`code_ok` in `cage.c`).
+
+## Product rules
+
+- Enhancements are options on top of authentic defaults. Keep the boot and
+  attract intros: they are part of the game.
+- Graphics stay on OpenGL; no Vulkan.
+- No "resume where you left off" on launch.
+- Settings live in the table in `config.c` (`MAX_OPTS`), and
+  `ragerecomp.ini` is written from it with comments.
+  `recomplauncher.json` (shipped in the packages) shows some of them in
+  RecompLauncher: change it too when one of those is renamed or its values
+  change.
+- Writable files go in `data_dir()`: `--data-dir` if given, else beside
+  the program if that's writable, else the user data folder `RageRecomp`.
+  Nothing is written anywhere else.
+- Every setting can be given on the command line (`--set section.key=value`,
+  `--fullscreen`, `--windowed`) for one session.
+- Bundled shaders in `shaders/` must be permissively licensed. GPL presets
+  are only fetched by `make shaders-extra`.
+
+## Workflows
+
+Build and run (needs gcc, SDL2, python3; game files in `run/`):
+
+    make                 # ragerecomp; game code is built at first launch
+    make recomp          # developer build with the game code linked in (never share it)
+    ./ragerecomp
+
+Regression test: a fixed 3600-frame boot, coin-up and fight, printing a
+state hash:
+
+    tools/regress.sh PROGRAM SET [RUN_DIR] [WORK_DIR]
+
+Translated and interpreted runs give different hashes, both valid, because
+translated code takes interrupts at block boundaries. What must match is
+every build of the same translated code (any compiler, linked-in or built
+at first launch). Useful environment variables:
+
+- `RR_NOREC=1`: 68K interpreter only (different but fixed hash).
+- `RR_NODSP=1`: sound DSP on the interpreter (same hash either way).
+- `RR_LOAD_MODULE=path.so`: use a given module.
+- `RR_DISPLAY_HZ=N`: pretend the display refreshes at N Hz, to test frame
+  pacing (under Xvfb vsync never waits, so ~60 Hz falls back to audio).
+- `RR_BUILD=1 RR_BUILD_WITH=cc|tcc`: build the module now, headless.
+- `RR_DUMP_AT`, `RR_WAV`, `RR_POKE`, `RR_LOG_SOUND`, `RR_CONSOLE`: as in
+  UltraCombo (`KI2_*`), renamed.
+
+Packages (no game files, no game code):
+
+    make packages        # dist/RageRecomp-Windows.zip, -Linux.tar.xz, -x86_64.AppImage (+ .zsync)
+
+Pushing a version tag builds them on GitHub Actions
+(`.github/workflows/release.yml`) into a draft release.
+`tools/fetch-deps.sh` fills `deps/` from pinned, checksummed downloads.
+See README.md, "Release packages". The Linux program targets glibc 2.31.
+
+Windows: `make windows` cross-compiles with MinGW. Test the Windows module
+path with `RR_BUILD_WITH=tcc` under Wine; the cc path needs real Windows.
+
+Windowed testing without a display: run it under `Xvfb :99` with
+`SDL_AUDIODRIVER=dummy`, and send keys with `xdotool keydown` / `keyup`
+held a few frames, because input is sampled once per frame and quick `key`
+taps get missed. Run a copy of the program from a scratch folder so it gets
+its own `ragerecomp.ini`.
+
+Headless switches: see `usage()` in `main.c` (`--headless`, `--script`,
+`--save-at`, `--load`). Debug environment variables, all read with
+`getenv` in `src/` (grep them for details).
+
+## Status (kept honest: update when it changes)
+
+- 68EC020 interpreter + translator: complete ISA incl. 020 addressing
+  modes, exceptions, autovector interrupts; 222 unit tests pass on Linux
+  and Windows (Wine). Interpreter/translator parity not yet verified.
+- CAGE DSP interpreter + translator: complete C31 ISA incl. parallel
+  ops, delay slots, DMA/timers/serial/host comm; float ALU verified
+  bit-identical to MAME's integer model on probed vectors. Translated
+  DSP parity not yet verified.
+- GT video, CAGE audio path, protection, EEPROM: implemented from MAME.
+- Save states: implemented. Rewind/netplay: not implemented (noted later).
+- Verified: 222 unit tests pass; Linux + Windows cross builds clean;
+  headless boot to title/attract/coin/start/fight with screenshots.
+- KNOWN BUG (audio silent): the DSP sound program crashes ~frame 283
+  (0x2041 voice-mix overruns its low-RAM buffer into the task stack at
+  0x557C, wild jump through sound ROM, lands in the boot stub and hangs
+  waiting serial). The 68K→DSP latch then sticks busy so no music plays.
+  Command values, DMA/DINT0 rates, timers, tables and float math all
+  match MAME; the trigger is scheduling (our sound-init burst lands ~5
+  frames later than MAME's). WAV output captures the resulting silence.
+- KNOWN BUG (attract crash): 68K address-error ~frame 2300 in attract
+  mode (odd pointer from an object table). Unrelated to the DSP issue.
+- CI (`.github/workflows/ci.yml`) builds Linux + Windows and runs tests
+  (Windows under Wine); written but never executed on GitHub Actions.
+
+## Style
+
+Match the surrounding code: C11, 4-space indent, short functions with short
+comments that say why, British spelling in prose ("licence", "colour"). The
+`-Wextra` warnings already in the build are known. Don't add new ones.
