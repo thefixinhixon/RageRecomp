@@ -50,26 +50,44 @@ static const char *bare(const char *path) {
     return b2 ? b2 + 1 : path;
 }
 
+// Where a file is: by name with the right CRC, else by CRC and length (the
+// way MAME finds a merged set's shared files, stored once under the
+// parent's name), else by name alone (a bad dump, reported). Returns 1
+// with *zi/*fi set.
+static int roms_find(roms_t *r, const rom_file_t *rf, int *zi_out, mz_uint *fi_out) {
+    int zi, pass;
+    for (pass = 0; pass < 3; pass++) {
+        for (zi = 0; zi < r->nzips; zi++) {
+            mz_uint n = mz_zip_reader_get_num_files(&r->zips[zi]), fi;
+            for (fi = 0; fi < n; fi++) {
+                mz_zip_archive_file_stat st;
+                int by_name, by_crc;
+                if (!mz_zip_reader_file_stat(&r->zips[zi], fi, &st))
+                    continue;
+                by_name = !strcmp(bare(st.m_filename), rf->name);
+                by_crc = rf->crc && st.m_crc32 == rf->crc &&
+                        st.m_uncomp_size == rf->length;
+                if (pass == 0 ? by_name && (by_crc || !rf->crc) :
+                        pass == 1 ? by_crc : by_name) {
+                    *zi_out = zi;
+                    *fi_out = fi;
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 uint8_t *roms_read(roms_t *r, const rom_file_t *rf, uint32_t *out_len) {
     int zi;
+    mz_uint fi;
     char name[256];
     size_t uncomp = 0;
     void *data = NULL;
     *out_len = 0;
-    for (zi = 0; zi < r->nzips; zi++) {
-        mz_uint n = mz_zip_reader_get_num_files(&r->zips[zi]), fi;
-        for (fi = 0; fi < n; fi++) {
-            mz_zip_archive_file_stat st;
-            if (!mz_zip_reader_file_stat(&r->zips[zi], fi, &st))
-                continue;
-            if (!strcmp(bare(st.m_filename), rf->name)) {
-                data = mz_zip_reader_extract_to_heap(&r->zips[zi], fi,
-                        &uncomp, 0);
-                break;
-            }
-        }
-        if (data) break;
-    }
+    if (roms_find(r, rf, &zi, &fi))
+        data = mz_zip_reader_extract_to_heap(&r->zips[zi], fi, &uncomp, 0);
     snprintf(name, sizeof(name), "%s", rf->name);
     if (!data) {
         if (r->nproblems < 64) {
@@ -95,31 +113,24 @@ uint8_t *roms_read(roms_t *r, const rom_file_t *rf, uint32_t *out_len) {
     return (uint8_t *)data;
 }
 
-// Is a file of this name in any of the zips? (No reading or CRC check.)
-static int roms_has(roms_t *r, const char *name) {
+// Is the file in any of the zips (by name, or by CRC and length)? No
+// reading or CRC check of the data.
+static int roms_has(roms_t *r, const rom_file_t *rf) {
     int zi;
-    for (zi = 0; zi < r->nzips; zi++) {
-        mz_uint n = mz_zip_reader_get_num_files(&r->zips[zi]), fi;
-        for (fi = 0; fi < n; fi++) {
-            mz_zip_archive_file_stat st;
-            if (mz_zip_reader_file_stat(&r->zips[zi], fi, &st) &&
-                    !strcmp(bare(st.m_filename), name))
-                return 1;
-        }
-    }
-    return 0;
+    mz_uint fi;
+    return roms_find(r, rf, &zi, &fi);
 }
 
 int roms_has_set(roms_t *r, const game_profile_t *p) {
     int i;
     for (i = 0; i < 4; i++)
-        if (!roms_has(r, p->prog[i].name)) return 0;
+        if (!roms_has(r, &p->prog[i])) return 0;
     for (i = 0; i < 3; i++)
-        if (!roms_has(r, p->tiles[i].name)) return 0;
+        if (!roms_has(r, &p->tiles[i])) return 0;
     for (i = 0; i < p->rle_count; i++)
-        if (!roms_has(r, p->rle[i].name)) return 0;
-    return roms_has(r, p->dspboot.name) && roms_has(r, p->dspsnd[0].name) &&
-            roms_has(r, p->dspsnd[1].name) && roms_has(r, p->chars.name);
+        if (!roms_has(r, &p->rle[i])) return 0;
+    return roms_has(r, &p->dspboot) && roms_has(r, &p->dspsnd[0]) &&
+            roms_has(r, &p->dspsnd[1]) && roms_has(r, &p->chars);
 }
 
 int roms_failed(roms_t *r) {

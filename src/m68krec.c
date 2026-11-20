@@ -105,15 +105,17 @@ static void add_func(rec_plan_t *p, uint32_t pc) {
 // A compiled switch: `jmp (table,pc,dn.w)` over a table of word offsets
 // from the table base. The table ends where the first case begins (the
 // cases follow it) or at the first entry that cannot be code. Its words
-// are marked as data so pointer candidates never start inside it.
+// are marked as data so pointer candidates never start inside it. Only
+// code found by descent can end it; earlier guesses may be wrong.
 static void switch_table(rec_plan_t *p, uint32_t base) {
     uint32_t i, end = p->size;
     for (i = 0; i < 1024; i++) {
         uint32_t a = base + i * 2, t;
         if (a + 2 > p->size || a >= end) break;
-        if (p->start[a >> 1]) break;
+        // only code found by descent ends the table: a guess may be wrong
+        if (p->start[a >> 1] && p->strong[a >> 1]) break;
         t = (base + (uint32_t)(int32_t)(int16_t)rom16(p, a)) & 0xffffffu;
-        if (t & 1 || t >= p->size || p->inside[t >> 1]) break;
+        if (t & 1 || t >= p->size || (p->inside[t >> 1] && p->strong[t >> 1])) break;
         if (t > base && t < end) end = t;
         p->inside[a >> 1] = 1;
         if (!p->guessing) p->strong[a >> 1] = 1;

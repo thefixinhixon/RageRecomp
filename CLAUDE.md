@@ -162,7 +162,9 @@ state hash:
 
 The hash is the same for translated and interpreted runs, for every
 compiler and for linked-in code; current value (primrage, RECOMP_VERSION
-6, STATE_FORMAT 3): `4dbfad98fe3f0aac`.
+7, STATE_FORMAT 3): `7a3e83d2c7c36469`. The state's compatibility id
+folds in RECOMP_VERSION, so a translator change moves the hash even when
+emulation is unchanged: compare instruction totals (`RR_INTERP_HIST`) too.
 Useful environment variables:
 
 - `RR_NOREC=1`: 68K on the interpreter; `RR_NODSP=1`: DSP on the
@@ -210,9 +212,10 @@ read with `getenv` in `src/` (grep them for details).
 ## Status (kept honest: update when it changes)
 
 - 68EC020 interpreter + translator: complete ISA incl. 020 addressing
-  modes, exceptions, autovector interrupts. The translator finds 81,915
-  instructions (all code below 0x50000); a 3600-frame coin-up and fight
-  runs with zero interpreted instructions.
+  modes, exceptions, autovector interrupts. The translator finds 81,923
+  instructions in primrage (80,535 in primrageo, 75,814 in primrage20; all
+  code below 0x50000); a 3600-frame coin-up and fight runs with zero
+  interpreted instructions in each.
 - CAGE DSP interpreter + translator: complete C31 ISA incl. parallel
   ops, delay slots, DMA/timers/serial/host comm; float ALU verified
   bit-identical to MAME's integer model on probed vectors. The translator
@@ -230,8 +233,12 @@ read with `getenv` in `src/` (grep them for details).
   keyboard, save/load state, screenshot, quit). Not here: rewind,
   run-ahead, netplay, auto-coin, rumble, training (UltraCombo has them;
   they need KI-specific RAM knowledge or code not ported).
-- Game versions: primrage played; primrageo/primrage20 wired (layouts per
-  MAME's input ports) but untested for lack of their zips.
+- Game versions: all three played to a fight (primrageo/primrage20 start
+  with button 1), each with zero interpreted instructions and translated
+  = interpreted hashes over the scripted 3600 frames (primrageo
+  `302bde79d30ae50d`, primrage20 `439057198c79a5a5`). Switching versions
+  in the menu restarts the program on the new set. ROM files are found by
+  name with the right CRC, else by CRC (merged sets), else by name.
 - Verified: 244 unit tests pass on Linux and under Wine; Linux + Windows
   builds clean; `make packages` built and the AppImage (Zig, 83 s first
   launch) and Windows zip (under Wine, TinyCC) both start and play.

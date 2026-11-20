@@ -38,6 +38,8 @@ GEN_C = $(OUTDIR)/gen/rec_headers.c
 GEN_O = $(OUTDIR)/gen/rec_headers.o $(OUTDIR)/gen/version.o
 CORE_OBJS = $(patsubst %.c,$(OUTDIR)/%.o,$(filter-out $(GEN_C),$(CORE_SRCS))) $(GEN_O)
 
+.DEFAULT_GOAL := all
+
 # The program's version: the tag being released on GitHub Actions, else
 # `git describe`, else "dev". Rewritten only when it changes.
 RR_VERSION ?= $(patsubst v%,%,$(or $(filter v%,$(GITHUB_REF_NAME)),$(shell git describe --tags --always --dirty 2>/dev/null),dev))

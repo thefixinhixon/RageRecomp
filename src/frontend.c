@@ -771,8 +771,8 @@ static void draw_menu(uint32_t *out)
         snprintf(b[S_PAUSE_BG], 72, "Pause in background\t%s", onoff[cfg.pause_unfocused]);
         int cur = (int)mach_profile->id;
         if (version_pick >= 0 && version_pick != cur) {
-            snprintf(b[S_VERSION], 72, "Game version\t< %s >  Enter: switch", version_label(version_pick));
-            foot = "SWITCHING RESTARTS THE GAME";
+            snprintf(b[S_VERSION], 72, "Game version\t< %s >*", version_label(version_pick));
+            foot = "ENTER SWITCHES (RESTARTS THE GAME)";
         } else if (versions_there() > 1) snprintf(b[S_VERSION], 72, "Game version\t< %s >", version_label(cur));
         else snprintf(b[S_VERSION], 72, "Game version\t%s", version_label(cur));
         snprintf(b[S_OPERATOR], 72, "Operator menu\t%s (hold)", cfg.hotkeys[HK_TEST] ? SDL_GetScancodeName(cfg.hotkeys[HK_TEST]) : "-");

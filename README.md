@@ -23,7 +23,8 @@ made from the game" discipline.
     needs it, and without it the game runs silent;
   - optionally `primrageo.zip` (2.3, Dec 1994) and `primrage20.zip` (2.0),
     which take their shared graphics and sound from `primrage.zip`. A
-    merged `primrage.zip` holding all three works too.
+    merged `primrage.zip` holding all three works too: as in MAME, files
+    are matched by CRC, whatever name a set stores them under.
 
 ## Quick start
 
@@ -191,8 +192,6 @@ tag builds them on GitHub Actions into a draft release.
 
 ## Status and known issues
 
-- The older versions (`primrageo`, `primrage20`) are wired up but have not
-  been played through here, for lack of their zips.
 - No rewind, run-ahead or netplay.
 - What is emulated, translated and verified is tracked in CLAUDE.md
   ("Status"). If the game desyncs, mis-renders or goes silent, the log and
