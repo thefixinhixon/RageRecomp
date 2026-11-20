@@ -1,0 +1,84 @@
+# Builds the three release packages when a version tag (v1.2.3) is pushed,
+# and attaches them to a draft release for that tag. Edit the notes and
+# publish it on GitHub. Run it by hand (Actions > Release > Run workflow) to
+# build the packages without releasing: they appear as the run's artifact.
+#
+# No game files are involved: the packages hold no game code, which each
+# player's copy builds at first launch.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  packages:
+    # the Linux program and SDL2 are built with Zig against glibc 2.31,
+    # whatever the runner has, so they run on the Steam Deck and older distros
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # A slow Ubuntu mirror once stretched this from under a minute to 26
+      # (v1.2.8). Stalled downloads time out and are retried (the runner's
+      # mirror list has others to try), and the step gives up after 20
+      # minutes instead of the job's default 6 hours. Only the 64-bit MinGW
+      # compiler: everything Windows is built for x86_64.
+      - name: Install build tools and SDL2's backend headers
+        timeout-minutes: 20
+        run: |
+          apt="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+          sudo apt-get $apt update -q
+          sudo apt-get $apt install -qy --no-install-recommends \
+            cmake ninja-build gcc-mingw-w64-x86-64 squashfs-tools zsync zip xz-utils python3 \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev \
+            libegl-dev libgl-dev libgles-dev libdrm-dev libgbm-dev \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev libsndio-dev \
+            libudev-dev libdbus-1-dev libibus-1.0-dev
+
+      - name: Cache deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            !deps/zig-cache
+          key: deps-${{ hashFiles('tools/fetch-deps.sh') }}
+
+      - name: Fetch and build deps
+        run: tools/fetch-deps.sh
+
+      - name: Build packages
+        run: |
+          make shaders-extra        # the GPL extras, shipped as their source files
+          export ZIG_GLOBAL_CACHE_DIR=$PWD/deps/zig-cache ZIG_LOCAL_CACHE_DIR=$PWD/deps/zig-cache
+          make -j"$(nproc)" package-appimage
+          make -j"$(nproc)" package-windows ICON_TOOL=dist/RageRecomp-Linux/ragerecomp
+          ls -la dist
+
+      - name: Keep the packages with the run
+        uses: actions/upload-artifact@v7
+        with:
+          name: RageRecomp-packages
+          path: |
+            dist/RageRecomp-Windows.zip
+            dist/RageRecomp-Linux.tar.xz
+            dist/RageRecomp-x86_64.AppImage
+            dist/RageRecomp-x86_64.AppImage.zsync
+
+      - name: Draft a release with the packages
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          files="dist/RageRecomp-Windows.zip dist/RageRecomp-Linux.tar.xz dist/RageRecomp-x86_64.AppImage dist/RageRecomp-x86_64.AppImage.zsync"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" $files --clobber     # a release made by hand for this tag
+          else
+            gh release create "$TAG" $files --draft --title "RageRecomp $TAG" --generate-notes
+          fi

@@ -34,7 +34,9 @@ int main(void) {
     T_EQ_U32(gt_colorram_r(0xd80000u), 0x7fffu, "colour RAM round trip");
     T_EQ_U32(rr_mrd16(0xd80000u, 0), 0x7fffu, "colour RAM via map");
 
-    // P1_P2 word: byte 0 = P1, byte 2 = P2, bytes 1/3 unconnected (1s).
+    // P1_P2 word: byte 0 = P1, byte 2 = P2, byte 1 unconnected (1s),
+    // byte 3 the Jan 1995 set's button 4 (released here).
+    mach.in.b0 = 0xff;
     mach.in.b1 = 0xfe; // P2 start held (active low bit0)
     mach.in.b3 = 0xff; // P1 released
     {
@@ -44,7 +46,10 @@ int main(void) {
         T_EQ_U32(mem_mrd8(0xe80000u), 0xffu, "P1_P2 byte 0 is P1");
         T_EQ_U32(mem_mrd8(0xe80001u), 0xffu, "P1_P2 byte 1 reads 1s");
         T_EQ_U32(mem_mrd8(0xe80002u), 0xfeu, "P1_P2 byte 2 is P2");
-        T_EQ_U32(mem_mrd8(0xe80003u), 0xffu, "P1_P2 byte 3 reads 1s");
+        T_EQ_U32(mem_mrd8(0xe80003u), 0xffu, "P1_P2 byte 3 idle 1s");
+        mach.in.b0 = 0xfd; // P1 button 4 (Jan 1995 layout)
+        T_EQ_U32(mem_mrd8(0xe80003u), 0xfdu, "P1_P2 byte 3 holds button 4");
+        mach.in.b0 = 0xff;
     }
     mach.in.b1 = 0xff;
     mach.in.b3 = 0xfe; // P1 start held
@@ -78,7 +83,7 @@ int main(void) {
     // EEPROM factory default is all 0xFF (MAME er2055 nvram_default).
     {
         int i, ok = 1;
-        eeprom_reset();
+        eeprom_factory();
         for (i = 0; i < 64; i++)
             if (eeprom_read((uint32_t)i) != 0xffu) ok = 0;
         T_OK(ok, "EEPROM defaults to 0xFF");
@@ -89,6 +94,8 @@ int main(void) {
         T_EQ_U32(eeprom_read(3), 0x42u, "unlocked EEPROM writes");
         eeprom_write(4, 0x11);
         T_EQ_U32(eeprom_read(4), 0xffu, "write relocks the chip");
+        eeprom_reset();     // power cycle: the cabinet keeps its settings
+        T_EQ_U32(eeprom_read(3), 0x42u, "power-on reset keeps the contents");
     }
 
     // Unmapped holes read zero and ignore writes.

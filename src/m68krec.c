@@ -401,9 +401,6 @@ int m68krec_write(rec_plan_t *p, const char *dir, const char *module,
     if (!x) { free(funcs); return -1; }
     fprintf(x, "// Translated from the game's own code. Do not edit or "
             "share.\n#define REC_MODULE 1\n#include \"rec_abi.h\"\n");
-    fprintf(x, "rr_mem_t *rrm;\nconst rr_hostfns_t *rrfns;\n"
-            "void rec_init_module(rr_mem_t *m, const rr_hostfns_t *f) "
-            "{ rrm = m; rrfns = f; }\n");
     for (i = 0; i < nf; i++) fprintf(x, "rr_rc_t rf_%x(void);\n", funcs[i]);
     fprintf(x, "static const rec_func_t funcs[] = {\n");
     for (i = 0; i < nf; i++)

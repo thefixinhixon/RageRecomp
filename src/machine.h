@@ -19,11 +19,14 @@
 // Main CPU clock and frame budget.
 #define M68K_HZ 25000000u
 
-// Cabinet inputs, sampled once per frame. b1/b3 are the raw P1_P2 port
+// Cabinet inputs, sampled once per frame. b0/b1/b3 are the raw P1_P2 port
 // bytes (active low; the frontend fills them per the game's layout, since
-// older sets reuse the start bits as action buttons). b3 is byte 0 (P1),
-// b1 is byte 2 (P2); bytes 1 and 3 are unconnected and read 1s.
+// older sets reuse the start bits as action buttons). b3 is the top byte
+// (P1: start, buttons 1-3, stick), b1 the second (P2, the same); b0, the
+// low byte, holds button 4 on the Jan 1995 set (bit 1 P1, bit 3 P2). The
+// third byte is unconnected and reads 1s.
 typedef struct {
+    uint8_t b0;
     uint8_t b1;
     uint8_t b3;
     uint8_t service; // bit0 = self-test button held

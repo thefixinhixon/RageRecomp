@@ -50,5 +50,5 @@ while [ $f -le 3580 ]; do
 done
 
 cd "$work_dir"
-"$prog" --roms "$run_dir" --frames 3600 --script "$script" --hash |
+"$prog" --roms "$run_dir" --data-dir "$work_dir" --frames 3600 --script "$script" --hash |
     grep '^state hash'

@@ -46,3 +46,30 @@ MAME is available at https://github.com/mamedev/mame under the licence below.
 ---------------------
 src/third_party/miniz/ is the miniz ZIP/deflate library by Rich Geldreich
 et al., used to read MAME ROM zip files. See src/third_party/miniz/LICENSE.
+
+3. UltraCombo frontend (MIT licence)
+------------------------------------
+The windowed frontend (src/frontend.c, osd.c, config.c, video.c,
+shaders.c, gl_funcs.h, png.c, icon.c, controller_labels.c, picker.c), the
+module builder's compiler handling (src/rec_build.c), the packaging scripts
+(tools/package.sh, tools/fetch-deps.sh, tools/install_shaders.py,
+tools/lola_retro.py) and the release workflow are adapted from UltraCombo,
+https://github.com/thefixinhixon/UltraCombo, Copyright (c) 2026
+thefixinhixon, under the MIT licence (the same terms as LICENSE).
+
+4. stb_image (public domain / MIT)
+----------------------------------
+src/third_party/stb_image.h by Sean Barrett, used to load shader lookup
+textures. Dual-licensed public domain / MIT; see the end of that file.
+
+5. Shader presets
+-----------------
+shaders/ holds libretro GLSL presets (crt-lottes, crt-hyllian, crt-1tap,
+crt-2tap, xBR, ScaleFX) and Lola Retro's arcade-15khz, each under the
+permissive licence in its file or folder; see shaders/README.txt.
+`make shaders-extra` fetches GPL presets for local use; they are separate
+files read at run time.
+
+Release packages additionally carry SDL2 (zlib), Zig (MIT) and TinyCC
+(LGPL 2.1, loaded as a separate library); their licences are in the
+packages' licenses/ folder.

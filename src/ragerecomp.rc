@@ -1,0 +1,30 @@
+// Windows resources: icon and version information. The Makefile passes the
+// version (RR_VERSION_STR "1.0.0", RR_VERSION_RC 1,0,0,0) from the release tag.
+#ifndef RR_VERSION_STR
+#define RR_VERSION_STR "dev"
+#define RR_VERSION_RC 0,0,0,0
+#endif
+1 ICON "ragerecomp.ico"
+
+1 VERSIONINFO
+FILEVERSION     RR_VERSION_RC
+PRODUCTVERSION  RR_VERSION_RC
+FILEOS          0x40004
+FILETYPE        0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "RageRecomp - native port of the arcade game Primal Rage"
+      VALUE "FileVersion", RR_VERSION_STR
+      VALUE "ProductName", "RageRecomp"
+      VALUE "ProductVersion", RR_VERSION_STR
+      VALUE "OriginalFilename", "RageRecomp.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

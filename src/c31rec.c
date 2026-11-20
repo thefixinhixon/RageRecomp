@@ -265,9 +265,6 @@ int drec_write(const drec_plan_t *p, const char *dir, const char *module,
     if (!x) goto out;
     fprintf(x, "// Translated from the game's own code. Do not edit or "
             "share.\n#define REC_MODULE 1\n#include \"rec_abi.h\"\n");
-    fprintf(x, "rr_mem_t *rrm;\nconst rr_hostfns_t *rrfns;\n"
-            "void rec_init_module(rr_mem_t *m, const rr_hostfns_t *f) "
-            "{ rrm = m; rrfns = f; }\n");
     for (k = 0; k < nf; k++)
         fprintf(x, "rr_rc_t df_%x(void);\n", drec_addr(funcs[k]));
     fprintf(x, "static const rec_func_t funcs[] = {\n");

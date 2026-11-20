@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=RageRecomp
+Comment=Native port of the arcade game Primal Rage (bring your own game files)
+Exec=ragerecomp
+Icon=ragerecomp
+Categories=Game;ArcadeGame;
+Terminal=false

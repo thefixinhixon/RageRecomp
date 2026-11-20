@@ -11,8 +11,6 @@
 
 static const rec_module_t *mod_m68k = NULL;
 static const rec_module_t *mod_dsp = NULL;
-static void *handle_m68k = NULL;
-static void *handle_dsp = NULL;
 static int force_interp_m68k = 0;
 static int force_interp_dsp = 0;
 static void map68_build(const rec_module_t *m);
@@ -77,38 +75,31 @@ void rec_init(void) {
     }
     if (!force_interp_dsp && rec_linked_dsp.nlabels > 0 &&
             rec_linked_dsp.abi == REC_ABI_VERSION)
-        rec_use_dsp(&rec_linked_dsp, NULL);
+        rec_use_dsp(&rec_linked_dsp);
 }
 
 void rec_shutdown(void) {
     hist_write();
-    // Handles are closed by rec_build (which opened them); just forget.
-    if (handle_m68k) rec_close_handle(handle_m68k);
-    if (handle_dsp) rec_close_handle(handle_dsp);
-    handle_m68k = handle_dsp = NULL;
+    // Modules stay loaded to the end (they are small); just forget them.
     mod_m68k = mod_dsp = NULL;
     rrm->dsp_mask = NULL;
 }
 
-int rec_use_m68k(const rec_module_t *mod, void *handle) {
+int rec_use_m68k(const rec_module_t *mod) {
     if (!mod || mod->abi != REC_ABI_VERSION || mod->kind != 0 ||
             !mod->nlabels)
         return -1;
-    if (handle_m68k) rec_close_handle(handle_m68k);
     mod_m68k = mod;
-    handle_m68k = handle;
     map68_build(mod);
     return 0;
 }
 
-int rec_use_dsp(const rec_module_t *mod, void *handle) {
+int rec_use_dsp(const rec_module_t *mod) {
     if (!mod || mod->abi != REC_ABI_VERSION || mod->kind != 1 ||
             !mod->nlabels)
         return -1;
     if (!mod->label_fn || !mod->image || !mod->mask) return -1;
-    if (handle_dsp) rec_close_handle(handle_dsp);
     mod_dsp = mod;
-    handle_dsp = handle;
     mapdsp_build(mod);
     rrm->dsp_mask = mod->mask;
     rrm->dsp_gen++;

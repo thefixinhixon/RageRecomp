@@ -4,6 +4,7 @@
 #include "mem.h"
 #include "rec_build.h"
 #include "gtvid.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -52,7 +53,7 @@ static uint32_t get32(const uint8_t *src) {
 void machine_state_size(uint32_t *size) {
     *size = 16 + SP_CPU + SP_DSP + SP_RAM + SP_BANK + SP_CR + SP_DRAM +
             SP_DIRAM + SP_DIO + 580 + SP_DAC + 32 + SP_EE + 4 + SP_XGA +
-            92 + gt_state_size();
+            96 + gt_state_size();
 }
 
 void machine_state_save(uint8_t *dst) {
@@ -154,7 +155,8 @@ void machine_state_save(uint8_t *dst) {
     put32(p + 36, mach.in.coin1);
     put32(p + 40, mach.in.coin2);
     put32(p + 44, mach.in.tilt);
-    p += 48;
+    put32(p + 48, mach.in.b0);
+    p += 52;
     gt_state_save(p);
 }
 
@@ -264,7 +266,8 @@ int machine_state_load(const uint8_t *src, uint32_t size) {
     mach.in.coin1 = (uint8_t)get32(p + 36);
     mach.in.coin2 = (uint8_t)get32(p + 40);
     mach.in.tilt = (uint8_t)get32(p + 44);
-    p += 48;
+    mach.in.b0 = (uint8_t)get32(p + 48);
+    p += 52;
     gt_state_load(p);
     // Derived state: re-derive the DSP float word rate (done above),
     // refresh the IRQ lines, and re-validate translated DSP chunks.
@@ -273,4 +276,53 @@ int machine_state_load(const uint8_t *src, uint32_t size) {
     mem_update_irq();
     dsp_revalidate();
     return 0;
+}
+
+// ------------------------------------------------------------- files
+
+int state_save_file(const char *path) {
+    uint32_t size;
+    uint8_t *blob;
+    FILE *f;
+    int ok;
+    machine_state_size(&size);
+    blob = (uint8_t *)calloc(size, 1);
+    if (!blob) return 0;
+    machine_state_save(blob);
+    f = fopen(path, "wb");
+    ok = f && fwrite(blob, 1, size, f) == size;
+    if (f && fclose(f) != 0) ok = 0;
+    free(blob);
+    return ok;
+}
+
+int state_load_file(const char *path) {
+    uint32_t size;
+    uint8_t *blob;
+    FILE *f = fopen(path, "rb");
+    int ok;
+    if (!f) return 0;
+    machine_state_size(&size);
+    blob = (uint8_t *)malloc(size);
+    ok = blob && fread(blob, 1, size, f) == size;
+    fclose(f);
+    if (ok) ok = machine_state_load(blob, size) == 0;
+    free(blob);
+    return ok;
+}
+
+uint64_t state_hash(void) {
+    uint32_t size, i;
+    uint8_t *blob;
+    uint64_t h = 1469598103934665603ull;
+    machine_state_size(&size);
+    blob = (uint8_t *)calloc(size, 1);
+    if (!blob) return 0;
+    machine_state_save(blob);
+    for (i = 0; i < size; i++) {
+        h ^= blob[i];
+        h *= 1099511628211ull;
+    }
+    free(blob);
+    return h;
 }

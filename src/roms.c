@@ -95,6 +95,33 @@ uint8_t *roms_read(roms_t *r, const rom_file_t *rf, uint32_t *out_len) {
     return (uint8_t *)data;
 }
 
+// Is a file of this name in any of the zips? (No reading or CRC check.)
+static int roms_has(roms_t *r, const char *name) {
+    int zi;
+    for (zi = 0; zi < r->nzips; zi++) {
+        mz_uint n = mz_zip_reader_get_num_files(&r->zips[zi]), fi;
+        for (fi = 0; fi < n; fi++) {
+            mz_zip_archive_file_stat st;
+            if (mz_zip_reader_file_stat(&r->zips[zi], fi, &st) &&
+                    !strcmp(bare(st.m_filename), name))
+                return 1;
+        }
+    }
+    return 0;
+}
+
+int roms_has_set(roms_t *r, const game_profile_t *p) {
+    int i;
+    for (i = 0; i < 4; i++)
+        if (!roms_has(r, p->prog[i].name)) return 0;
+    for (i = 0; i < 3; i++)
+        if (!roms_has(r, p->tiles[i].name)) return 0;
+    for (i = 0; i < p->rle_count; i++)
+        if (!roms_has(r, p->rle[i].name)) return 0;
+    return roms_has(r, p->dspboot.name) && roms_has(r, p->dspsnd[0].name) &&
+            roms_has(r, p->dspsnd[1].name) && roms_has(r, p->chars.name);
+}
+
 int roms_failed(roms_t *r) {
     return r->missing || r->nproblems > 0;
 }

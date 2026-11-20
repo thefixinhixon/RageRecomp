@@ -35,3 +35,8 @@ saves/
 # MAME side effects when probing from the repo root
 cfg/
 nvram/
+
+# Third-party downloads (tools/fetch-deps.sh)
+deps/
+build-pkg/
+shaders/extra/

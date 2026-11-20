@@ -18,6 +18,9 @@ void roms_close(roms_t *r);
 // present, so `--force-bad-dump` style flows can continue).
 uint8_t *roms_read(roms_t *r, const rom_file_t *rf, uint32_t *out_len);
 
+// True when every file the set needs is in the zips, by name (quick: no
+// reading, no CRC check).
+int roms_has_set(roms_t *r, const game_profile_t *p);
 // True when anything was missing or mismatched.
 int roms_failed(roms_t *r);
 // Human-readable report (missing files with expected CRCs first).

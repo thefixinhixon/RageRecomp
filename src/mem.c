@@ -53,9 +53,10 @@ void mem_set_video(int state) {
 // ------------------------------------------------------------- inputs
 
 static uint32_t p1p2_word(void) {
-    // Bytes 0 and 2 are unconnected (read 1s); bytes 1/3 are P2/P1.
+    // Byte 2 is unconnected (reads 1s); bytes 3/1 are P1/P2, byte 0 the
+    // Jan 1995 set's button 4.
     return ((uint32_t)mach.in.b3 << 24) | 0x00ff0000u |
-            ((uint32_t)mach.in.b1 << 8) | 0xffu;
+            ((uint32_t)mach.in.b1 << 8) | mach.in.b0;
 }
 
 static uint16_t service_half(void) {

@@ -5,8 +5,12 @@
 eeprom_t eeprom;
 
 void eeprom_reset(void) {
-    // Factory default is all-0xFF (MAME's er2055 nvram_default). Save
-    // states overwrite this after reset when one is loaded.
+    // A power cycle keeps the contents (it is the cabinet's NVRAM).
+    eeprom.unlocked = 0;
+}
+
+void eeprom_factory(void) {
+    // Factory default is all-0xFF (MAME's er2055 nvram_default).
     memset(eeprom.data, 0xff, sizeof(eeprom.data));
     eeprom.unlocked = 0;
 }

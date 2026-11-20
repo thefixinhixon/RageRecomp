@@ -11,7 +11,10 @@ typedef struct {
 
 extern eeprom_t eeprom;
 
+// Power-on: relock; the contents stay, as on the board.
 void eeprom_reset(void);
+// Blank chip (all 0xFF), as a cabinet without saved settings has.
+void eeprom_factory(void);
 // offset = (address - 0xD20000) >> 1 (bytes live at odd addresses).
 uint8_t eeprom_read(uint32_t offset);
 void eeprom_write(uint32_t offset, uint8_t data);
