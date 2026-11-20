@@ -130,7 +130,7 @@ uint32_t mem_mrd8(uint32_t addr) {
     if (addr >= 0xd00010u && addr < 0xd00020u)
         return (addr & 1) ? 0xffu : 0u; // no ADC board: odd bytes read 1s
     if (addr >= 0xd20000u && addr < 0xd21000u)
-        return (addr & 1) ? eeprom_read((addr - 0xd20000u) >> 1) : 0u;
+        return (addr & 1) ? 0u : eeprom_read((addr - 0xd20000u) >> 1);
     if (addr >= 0xd70000u && addr < 0xd80000u) return bank_rb(addr);
     if (addr >= 0xd80000u && addr < 0xe00000u) {
         uint16_t h = gt_colorram_r(addr & ~1u), d = h;
@@ -161,7 +161,7 @@ uint32_t mem_mrd16(uint32_t addr) {
     if (addr >= 0xd00010u && addr < 0xd00020u)
         return (addr & 1) ? 0u : 0x00ffu;
     if (addr >= 0xd20000u && addr < 0xd21000u)
-        return (addr & 1) ? 0u : eeprom_read((addr - 0xd20000u) >> 1);
+        return (addr & 1) ? 0u : (uint32_t)eeprom_read((addr - 0xd20000u) >> 1) << 8;
     if (addr >= 0xd70000u && addr < 0xd80000u) return bank_rw(addr);
     if (addr >= 0xd80000u && addr < 0xe00000u) {
         uint16_t h = gt_colorram_r(addr), d = h;
@@ -187,9 +187,9 @@ uint32_t mem_mrd32(uint32_t addr) {
         return ((uint32_t)cage_main_r() << 16) | cage_control_r();
     if (addr >= 0xd00010u && addr + 3 < 0xd00020u) return 0x00ff00ffu;
     if (addr >= 0xd20000u && addr + 3 < 0xd21000u) {
-        uint32_t b1 = eeprom_read((addr + 1 - 0xd20000u) >> 1);
-        uint32_t b3 = eeprom_read((addr + 3 - 0xd20000u) >> 1);
-        return (b1 << 16) | b3;
+        uint32_t b0 = eeprom_read((addr - 0xd20000u) >> 1);
+        uint32_t b2 = eeprom_read((addr + 2 - 0xd20000u) >> 1);
+        return (b0 << 24) | (b2 << 8);
     }
     if (addr >= 0xd70000u && addr + 3 < 0xd80000u)
         return ((uint32_t)bank_rw(addr) << 16) | bank_rw(addr + 2);
@@ -240,7 +240,7 @@ void mem_mwr8(uint32_t addr, uint32_t val) {
         return;
     }
     if (addr >= 0xd20000u && addr < 0xd21000u) {
-        if (addr & 1) eeprom_write((addr - 0xd20000u) >> 1, (uint8_t)val);
+        if (!(addr & 1)) eeprom_write((addr - 0xd20000u) >> 1, (uint8_t)val);
         return;
     }
     if (addr >= 0xd40000u && addr < 0xd50000u) {
@@ -286,9 +286,9 @@ void mem_mwr16(uint32_t addr, uint32_t val) {
         return;
     }
     if (addr >= 0xd20000u && addr < 0xd21000u) {
-        // A 16-bit write lands its low byte on the odd lane.
+        // A 16-bit write lands its high byte on the even lane.
         if ((addr & 1) == 0)
-            eeprom_write((addr - 0xd20000u) >> 1, (uint8_t)val);
+            eeprom_write((addr - 0xd20000u) >> 1, (uint8_t)(val >> 8));
         return;
     }
     if (addr >= 0xd40000u && addr < 0xd50000u) {
@@ -331,8 +331,8 @@ void mem_mwr32(uint32_t addr, uint32_t val) {
         return;
     }
     if (addr >= 0xd20000u && addr + 3 < 0xd21000u) {
-        eeprom_write((addr + 1 - 0xd20000u) >> 1, (uint8_t)(val >> 16));
-        eeprom_write((addr + 3 - 0xd20000u) >> 1, (uint8_t)val);
+        eeprom_write((addr - 0xd20000u) >> 1, (uint8_t)(val >> 24));
+        eeprom_write((addr + 2 - 0xd20000u) >> 1, (uint8_t)(val >> 8));
         return;
     }
     if (addr >= 0xd70000u && addr + 3 < 0xd80000u) {

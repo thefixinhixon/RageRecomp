@@ -25,7 +25,7 @@ SYSLIBS ?= -lm -ldl
 CORE_SRCS = \
     src/machine.c src/mem.c src/m68k.c src/c31.c src/cage.c \
     src/rec.c src/rec_build.c src/rec_none.c src/roms.c src/game.c \
-    src/eeprom.c src/xga.c src/gtvid.c src/state.c \
+    src/eeprom.c src/adjust.c src/xga.c src/gtvid.c src/state.c \
     src/m68kdis.c src/c31dis.c src/m68krec.c src/c31rec.c \
     src/paths.c src/launch.c src/controls.c src/net.c src/netplay.c \
     src/third_party/miniz/miniz.c \
@@ -53,7 +53,7 @@ $(OUTDIR)/gen/version.o: $(OUTDIR)/gen/version.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 FORCE:
-TESTS = t_rmw t_ea t_an t_mem t_cage t_dsp_boot t_dsp_alu
+TESTS = t_rmw t_ea t_an t_mem t_cage t_dsp_boot t_dsp_alu t_adjust
 TEST_BINS = $(addprefix $(OUTDIR)/,$(addsuffix $(EXE),$(TESTS)))
 
 HAVE_SDL ?= $(shell pkg-config --exists sdl2 2>/dev/null && echo yes)

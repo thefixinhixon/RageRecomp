@@ -92,11 +92,26 @@ and F1 opens the menu.
 
 ## The game's own settings
 
-Coinage, free play, difficulty, rounds and the like are the cabinet's
-operator settings: hold F2 for the game's test mode and change them there,
-as an operator would. They are kept in the cabinet's EEPROM, saved per
-version as `saves/<set>.eeprom`, along with the high scores. "Reset game"
-power-cycles the cabinet and keeps them, as the real board does.
+Primal Rage has no DIP switches: its settings are the cabinet's operator
+settings, kept in its EEPROM (saved per version as `saves/<set>.eeprom`,
+with the statistics and high scores). Menu > Game & system changes the
+main ones, the same way the game's test menu stores them:
+
+| Setting | Choices (game's default) |
+|---|---|
+| Difficulty | 1 (easiest) to 16 (7) |
+| Round time | 30 to 80 seconds (55) |
+| Free play | Off / On (Off) |
+| Coinage | 1 to 8 coins per credit (2) |
+| Blood | Full gore / No gore (Full gore) |
+
+The game reads them when the cabinet powers on, so a change (marked `*`)
+applies on "Reset game", or the next start. On the very first start the
+game writes its defaults during its boot, so they can be changed once it
+has booted. Everything else (bonus coins, coin mechanisms, continue
+discount, language, volumes, statistics, tests) is in the game's own test
+menu: hold F2. "Reset game" power-cycles the cabinet and keeps the EEPROM,
+as the real board does.
 
 ## Menu and settings
 
@@ -112,7 +127,7 @@ Netplay.
 - **Run-ahead** (0-2 frames): shows the result of your input sooner by
   emulating ahead and rolling back each frame.
 - **Auto-coin**: Start with no credits drops in coins (the default coinage
-  takes two per credit), then starts.
+  takes two per credit), then starts. Off by itself in free play.
 - **Practice**: training mode refills health after each combo and holds the
   round clock; player 2 can be kept low to practise finishing; a player 2
   dummy can be recorded with your own controls and played back; an input
@@ -216,9 +231,10 @@ tag builds them on GitHub Actions into a draft release.
 
 ## Status and known issues
 
-- The game's own settings (difficulty, free play, coinage) are changed in
-  its operator menu (F2): they live in the cabinet's EEPROM behind the
-  game's own error-correcting writer, so the program doesn't edit them.
+- Builds before this one wired the EEPROM to the wrong byte lane: the game
+  read blank settings and nothing it wrote was kept (operator settings,
+  statistics, high scores). Their `saves/*.eeprom` files are blank, so
+  nothing is lost; the game sets itself up on the next start.
 - Training mode holds the round clock by setting it back each second, so
   its last digit blinks once a second.
 - Which fighter is the computer's is known on the Jan 1995 version only;

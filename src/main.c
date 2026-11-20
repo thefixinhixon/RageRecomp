@@ -27,6 +27,7 @@
 #include "state.h"
 #include "cage.h"
 #include "eeprom.h"
+#include "adjust.h"
 #include "paths.h"
 #include "launch.h"
 #include "version.h"
@@ -867,6 +868,8 @@ int main(int argc, char **argv) {
         snprintf(nvram_path, sizeof(nvram_path), "%s/%s.eeprom", dir, prof->set);
     }
     nvram_load();
+    if (getenv("RR_ADJUST") && !adjust_parse(getenv("RR_ADJUST")))   // operator settings, for tests
+        fprintf(stderr, "RR_ADJUST: bad setting, or the EEPROM holds no settings yet\n");
     rec_init();
     machine_reset();
     if (dis_count) {

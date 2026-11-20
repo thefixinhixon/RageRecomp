@@ -15,7 +15,8 @@ extern eeprom_t eeprom;
 void eeprom_reset(void);
 // Blank chip (all 0xFF), as a cabinet without saved settings has.
 void eeprom_factory(void);
-// offset = (address - 0xD20000) >> 1 (bytes live at odd addresses).
+// offset = (address - 0xD20000) >> 1: bytes live at even addresses (MAME
+// maps the chip with umask32(0xff00ff00)).
 uint8_t eeprom_read(uint32_t offset);
 void eeprom_write(uint32_t offset, uint8_t data);
 // Any write into 0xD40000-0xD4FFFF unlocks the chip.

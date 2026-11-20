@@ -9,6 +9,8 @@
 #include "cage.h"
 #include "rec.h"
 #include "gtvid.h"
+#include "adjust.h"
+#include "eeprom.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,6 +43,7 @@ void machine_reset(void) {
     if (cage.ram) memset(cage.ram, 0, RR_DSP_RAM_WORDS * 4);
     if (cage.iram) memset(cage.iram, 0, 0x800u * 4);
     eeprom_reset();
+    adjust_powered_on();    // the operator settings the game reads now
     xga_reset();
     cage_reset();
     gt_reset();

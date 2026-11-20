@@ -96,6 +96,22 @@ int main(void) {
         T_EQ_U32(eeprom_read(4), 0xffu, "write relocks the chip");
         eeprom_reset();     // power cycle: the cabinet keeps its settings
         T_EQ_U32(eeprom_read(3), 0x42u, "power-on reset keeps the contents");
+        // On the bus the chip's bytes sit at even addresses (MAME's
+        // umask32(0xff00ff00)): byte n at 0xD20000 + 2n. The game's driver
+        // reads and writes those; odd addresses are not the chip.
+        T_EQ_U32(rr_mrd8(0xd20006u), 0x42u, "EEPROM byte 3 at an even address");
+        T_EQ_U32(rr_mrd8(0xd20007u), 0u, "odd address is not the chip");
+        T_EQ_U32(rr_mrd16(0xd20006u, 0), 0x4200u, "16-bit read: chip byte in the high half");
+        T_EQ_U32(rr_mrd32(0xd20004u, 0), 0xff004200u, "32-bit read: bytes 2 and 3");
+        rr_mwr8(0xd40000u, 0);
+        rr_mwr8(0xd20008u, 0x5a);
+        T_EQ_U32(eeprom_read(4), 0x5au, "byte write at an even address reaches the chip");
+        rr_mwr8(0xd40000u, 0);
+        rr_mwr8(0xd2000bu, 0x77);
+        T_EQ_U32(eeprom.data[5], 0xffu, "byte write at an odd address does not");
+        rr_mwr8(0xd40000u, 0);
+        rr_mwr16(0xd2000au, 0x6600, 0);
+        T_EQ_U32(eeprom_read(5), 0x66u, "16-bit write stores its high byte");
     }
 
     // Unmapped holes read zero and ignore writes.

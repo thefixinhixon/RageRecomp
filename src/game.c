@@ -73,6 +73,7 @@ static const game_profile_t profiles[GAME_COUNT] = {
         },
         .rle_count = 26,
         .credits = 0xffe1f6u, .timer = 0xffe8e5u, .fighters = 0xffe7bcu, .fighter_step = 0x94u,
+        .opt_len = 0x53, .opt_copy2 = 0x5b, .coin_nibble = 98, .game_nibble = 102,
         .players = 0xffe398u,
     },
     [GAME_PRIMRAGEO] = {
@@ -106,6 +107,7 @@ static const game_profile_t profiles[GAME_COUNT] = {
         },
         .rle_count = 26,
         .credits = 0xffe1ceu, .timer = 0xffe8b9u, .fighters = 0xffe790u, .fighter_step = 0x94u,
+        .opt_len = 0x53, .opt_copy2 = 0x5b, .coin_nibble = 98, .game_nibble = 102,
         .players = 0,
     },
     [GAME_PRIMRAGE20] = {
@@ -140,6 +142,7 @@ static const game_profile_t profiles[GAME_COUNT] = {
         },
         .rle_count = 26,
         .credits = 0xffdf00u, .timer = 0xffe5b8u, .fighters = 0xffe4a0u, .fighter_step = 0x8cu,
+        .opt_len = 0x51, .opt_copy2 = 0x59, .coin_nibble = 94, .game_nibble = 98,
         .players = 0,
     },
 };

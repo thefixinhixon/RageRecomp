@@ -23,6 +23,7 @@
 #include "shaders.h"
 #include "version.h"
 #include "training.h"
+#include "adjust.h"
 #include "netplay.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
@@ -462,7 +463,7 @@ static struct { int player, coins, t, wait; bool active; } ac;
 static void auto_coin(uint32_t held[2])
 {
     static uint32_t prev[2];
-    if (!ac.active && cfg.auto_coin)
+    if (!ac.active && cfg.auto_coin && adjust_running(ADJ_FREE_PLAY) != 1)   // free play needs no coins
         for (int p = 0; p < 2; p++) {
             int c = game_credits();
             bool press = (held[p] & ~prev[p]) >> BTN_START & 1;
@@ -634,6 +635,7 @@ static void apply_rewind_setting(void)
 
 static void hard_reset(void)
 {
+    adjust_apply();                     // operator settings changed in the menu
     app_nvram_save();
     machine_reset();
     state_init();
@@ -646,7 +648,8 @@ static void hard_reset(void)
 enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_PRACTICE, M_NETPLAY, M_RESET, M_QUIT, M_COUNT };
 enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_PERF, G_BACK, G_COUNT };
 enum { C_P1PAD, C_P2PAD, C_P1, C_P2, C_PAD, C_HOTKEYS, C_PADHOT, C_SOCD, C_RUMBLE, C_DEADZONE, C_P1LABELS, C_P2LABELS, C_BACK, C_COUNT };
-enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_VERSION, S_OPERATOR, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
+enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_VERSION, S_DIFFICULTY, S_ROUNDTIME, S_FREEPLAY, S_COST, S_GORE,
+       S_OPERATOR, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
 enum { T_TRAINING, T_REFILL, T_P2HEALTH, T_INPUTS, T_RECORD, T_PLAY, T_BACK, T_COUNT };
 enum { N_HOST, N_JOIN, N_ADDRESS, N_PORT, N_DELAY, N_DISCONNECT, N_BACK, N_COUNT };
 
@@ -893,7 +896,24 @@ static void draw_menu(uint32_t *out)
         } else if (versions_there() > 1) snprintf(b[S_VERSION], 72, "Game version\t< %s >", version_label(cur));
         else snprintf(b[S_VERSION], 72, "Game version\t%s", version_label(cur));
         snprintf(b[S_OPERATOR], 72, "Operator menu\t%s (hold)", cfg.hotkeys[HK_TEST] ? SDL_GetScancodeName(cfg.hotkeys[HK_TEST]) : "-");
-        snprintf(b[S_AUTOCOIN], 72, "Auto-coin\t%s", onoff[cfg.auto_coin]);
+        {
+            // The game's own settings, stored in its EEPROM like its test menu does.
+            static const struct { int row; adjust_id_t id; const char *name; } ops[] = {
+                { S_DIFFICULTY, ADJ_DIFFICULTY, "Difficulty" }, { S_ROUNDTIME, ADJ_ROUND_TIME, "Round time" },
+                { S_FREEPLAY, ADJ_FREE_PLAY, "Free play" }, { S_COST, ADJ_GAME_COST, "Coinage" },
+                { S_GORE, ADJ_GORE, "Blood" },
+            };
+            for (size_t i = 0; i < sizeof ops / sizeof ops[0]; i++) {
+                int v = adjust_get(ops[i].id);
+                bool later = v >= 0 && v != adjust_running(ops[i].id);
+                snprintf(b[ops[i].row], 72, "%s\t< %s >%s", ops[i].name, adjust_text(ops[i].id, v), later ? "*" : "");
+                if (menu_sel == ops[i].row)
+                    foot = v < 0 ? "THE GAME SETS THESE UP ON ITS FIRST BOOT" : "THE GAME'S OWN SETTING (STORED IN ITS EEPROM)";
+            }
+            if (adjust_pending()) foot = "* CHANGES APPLY ON RESET GAME";
+        }
+        if (adjust_running(ADJ_FREE_PLAY) == 1) snprintf(b[S_AUTOCOIN], 72, "Auto-coin\t(free play)");
+        else snprintf(b[S_AUTOCOIN], 72, "Auto-coin\t%s", onoff[cfg.auto_coin]);
         {
             static const char *const ra_names[] = { "Off", "1 frame", "2 frames" };
             int ra = cfg.run_ahead < 0 ? 0 : cfg.run_ahead > 2 ? 2 : cfg.run_ahead;
@@ -901,7 +921,7 @@ static void draw_menu(uint32_t *out)
         }
         snprintf(b[S_REWIND], 72, "Rewind\t%s", onoff[cfg.rewind]);
         snprintf(b[S_BACK], 72, "Back");
-        if (menu_sel == S_OPERATOR) foot = "COINAGE, FREE PLAY, DIFFICULTY: IN THE GAME'S TEST MODE";
+        if (menu_sel == S_OPERATOR) foot = "ALL OF THE GAME'S SETTINGS, STATISTICS AND TESTS";
         break;
     }
     case PG_PRACTICE: {
@@ -1134,6 +1154,15 @@ static void menu_change(int dir)
             app_restart();                          // returns only if that failed
             osd_message("Could not restart: the version changes next time");
             return;
+        }
+        case S_DIFFICULTY: case S_ROUNDTIME: case S_FREEPLAY: case S_COST: case S_GORE: {
+            static const adjust_id_t ids[] = { ADJ_DIFFICULTY, ADJ_ROUND_TIME, ADJ_FREE_PLAY, ADJ_GAME_COST, ADJ_GORE };
+            adjust_id_t id = ids[menu_sel - S_DIFFICULTY];
+            if (in_netplay()) { not_in_netplay(); return; }      // the host's EEPROM is the session's
+            int v = adjust_get(id), n = adjust_choices(id);
+            if (v < 0) { osd_message("The game sets up its settings on its first boot"); return; }
+            adjust_set(id, ((v + (dir ? dir : 1)) % n + n) % n);
+            break;
         }
         case S_OPERATOR: return;
         case S_AUTOCOIN: cfg.auto_coin = !cfg.auto_coin; break;
@@ -1716,6 +1745,7 @@ int frontend_main(void)
         }
     }
     netplay_stop();
+    adjust_apply();                     // kept for next time (main saves the EEPROM)
     if (menu_changed) menu_close();
     settle_display(true);
     if (!fullscreen) {

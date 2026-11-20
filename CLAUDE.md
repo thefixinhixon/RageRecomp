@@ -37,7 +37,8 @@ The game's ROMs and code are copyrighted. This repo is public.
 | CAGE sound board: DMA, timers, serial, host comm, DAC mix | `cage.c/h` |
 | GT video: tiles, alpha, RLE motion objects, composite | `gtvid.c/h` |
 | Protection (XGA 136094-0004A) | `xga.c/h` |
-| EEPROM 2816 (kept across power cycles; `saves/<set>.eeprom`) | `eeprom.c/h`, `main.c` |
+| EEPROM 2816 (kept across power cycles; `saves/<set>.eeprom`); chip bytes at even addresses | `eeprom.c/h`, `mem.c`, `main.c` |
+| Operator settings in the EEPROM (record code, option fields), Game page rows | `adjust.c/h` |
 | MAME zip loading, interleave, CRC checks, missing-file UX | `roms.c/h` |
 | Save states | `state.c/h` |
 | Window, menu, pacing, input, audio (adapted from UltraCombo) | `frontend.c`, `osd.c/h`, `config.c/h`, `controller_labels.c/h`, `screen.h` (336x240) |
@@ -141,8 +142,10 @@ The game's ROMs and code are copyrighted. This repo is public.
 - No "resume where you left off" on launch.
 - Settings live in the table in `config.c` (`MAX_OPTS`), and
   `ragerecomp.ini` is written from it with comments. The game's own
-  settings (coinage, free play, difficulty) stay in the cabinet's EEPROM,
-  changed through its test mode (the test-switch hotkey, F2).
+  settings (coinage, free play, difficulty, round time, gore) stay in the
+  cabinet's EEPROM: the menu edits them there the way the game's test menu
+  stores them (`adjust.c`), held until the next power-on; not in the ini.
+  The rest stays in the game's test mode (the test-switch hotkey, F2).
   `recomplauncher.json` (shipped in the packages) shows some of them in
   RecompLauncher: change it too when one of those is renamed or its values
   change.
@@ -168,7 +171,7 @@ state hash:
     tools/regress.sh PROGRAM SET [RUN_DIR] [WORK_DIR]
 
 The hash is the same for translated and interpreted runs, for every
-compiler and for linked-in code; current value (primrage, STATE_FORMAT 5): `469b07db1f697513`. The state no longer folds in the
+compiler and for linked-in code; current value (primrage, STATE_FORMAT 6): `9b37a456086b84d1`. The state no longer folds in the
 translator version (translated = interpreted), and leaves out the DAC
 output queue (host audio, not emulated state), so playing or recording
 sound doesn't change it. Rewind, run-ahead and netplay rollback
@@ -193,7 +196,10 @@ Useful environment variables:
   F:ADDR:VAL`, `RR_WAV`, `RR_SPEED`, `RR_HISTORY`, `RR_RESET_TEST=N` (a
   reset after N frames must equal a fresh power-on), `RR_DESYNC_AT`
   (netplay), `RR_DUMP_ON_EXC`, `RR_COVER` (interpreter coverage),
-  `RR_TRAINING=F` (windowed program's headless mode).
+  `RR_TRAINING=F` (windowed program's headless mode), `RR_ADJUST=
+  difficulty=16,free_play=1,round_time=80,game_cost=2,gore=1` (operator
+  settings into the EEPROM image before power-on; it must hold the game's
+  settings already: boot once with `--nvram` for 1500 frames).
 - `RR_LOG_FRAME=2`: 68K position after every scanline (for bisecting a
   divergence between two runs); `RR_DUMP_DSP=file`: the DSP image the
   translator planned from.
@@ -241,14 +247,25 @@ read with `getenv` in `src/` (grep them for details).
   TinyCC under Wine, and the linked-in build.
 - GT video, CAGE audio path (music and effects play; the opening attract
   is quiet in MAME too), protection, EEPROM (persisted per set): from MAME.
+  The EEPROM sits on the even byte lane (MAME's `umask32(0xff00ff00)`);
+  until STATE_FORMAT 6 it was on the odd one, so the game read zeros
+  (which pass its check) and its writes were lost.
+- Operator settings (`adjust.c`): the game's numbered values packed as
+  nibbles in one EEPROM record (two copies; RAM shadow 0xFFFF81DC),
+  stored with the driver's code (data at non-power-of-two indices, parity
+  bytes at powers of two and 0). Coin options are value 0x28 (0x26 on
+  v2.0), game options 0x29 (0x27); fields from the test menu's own tables.
+  Verified: the game keeps edited records, its GAME OPTIONS page shows
+  them, free play starts a game on all three versions.
 - Frontend (from UltraCombo, feature for feature): menu, ragerecomp.ini,
   OpenGL with filters and libretro presets, gamepads with assignment,
   labels and rumble, save states, rewind, run-ahead, boot skip, auto-coin,
   training mode with dummy record/play, input display, rollback netplay,
-  screenshots, pacing, welcome screen, launcher paths. Not applicable to
-  this hardware: KI's DIP switches (blood, finishing moves), disk speed,
-  cabinet volume buttons, service credit; difficulty/free play stay in the
-  game's operator menu (EEPROM with the game's own ECC writer).
+  screenshots, pacing, welcome screen, launcher paths, operator settings
+  (UltraCombo's DIP/difficulty rows: difficulty, round time, free play,
+  coinage, gore). Not applicable to this hardware: finishing-move and
+  attract-sound switches, disk speed, cabinet volume buttons, service
+  credit.
 - Game RAM (traced with RR_DUMP_AT; `game.c`): credits, round clock,
   fighter records (damage taken at +0x5A, 8.8, KO at 0x7800), players
   bitmask (Jan only).
@@ -259,11 +276,12 @@ read with `getenv` in `src/` (grep them for details).
   round-trips; controller-label test passes (93 checks).
 - Game versions: all three played to a fight (primrageo/primrage20 start
   with button 1), each with zero interpreted instructions and translated
-  = interpreted hashes over the scripted 3600 frames (primrageo
-  `302bde79d30ae50d`, primrage20 `439057198c79a5a5` at RECOMP_VERSION 7). Switching versions
+  = interpreted hashes over the scripted 3600 frames (`--script` as in
+  regress.sh; primrageo `bf975e06b10ef47a`, primrage20 `b658df2228342ef1`
+  at STATE_FORMAT 6). Switching versions
   in the menu restarts the program on the new set. ROM files are found by
   name with the right CRC, else by CRC (merged sets), else by name.
-- Verified: 244 unit tests pass on Linux and under Wine; Linux + Windows
+- Verified: 282 unit tests pass on Linux and under Wine; Linux + Windows
   builds clean; `make packages` built and the AppImage (Zig, 83 s first
   launch) and Windows zip (under Wine, TinyCC) both start and play.
 - CI and release workflows written but never executed on GitHub Actions.

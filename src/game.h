@@ -48,6 +48,11 @@ typedef struct {
     uint32_t fighter_step;  // ...this far apart; damage taken is the word at
                             // +0x5A, 8.8, a KO at 120 (0x7800)
     uint32_t players;       // bitmask of players in the game (bit 0 = P1)
+    // Operator settings in the EEPROM (adjust.c): the record holding them
+    // has opt_len data bytes, stored at byte 0 and again at opt_copy2; the
+    // coin and game option words start at these nibbles of its data.
+    uint16_t opt_len, opt_copy2;
+    uint8_t coin_nibble, game_nibble;
 } game_profile_t;
 
 const game_profile_t *game_profile(game_id_t id);
