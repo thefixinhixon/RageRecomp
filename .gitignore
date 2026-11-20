@@ -40,3 +40,6 @@ nvram/
 deps/
 build-pkg/
 shaders/extra/
+
+# RAM dumps and states from the test tools (game-derived)
+*.bin

@@ -182,12 +182,13 @@ bool netplay_join(const char *hostname, int port, int input_delay)
 
 static void begin_session(void)
 {
-    // both sides: same operator settings, power-cycle, same boot frames
+    // both sides: same operator settings (as the host sent them: its game
+    // may have written since), power-cycle, same boot frames
     if (!host) {
         memcpy(own_nv, eeprom.data, sizeof(eeprom.data));
         own_nv_saved = true;
-        memcpy(eeprom.data, nv_buf, sizeof(eeprom.data));
     }
+    memcpy(eeprom.data, nv_buf, sizeof(eeprom.data));
     reset_cb();
     state_set_history((size_t)64 << 20);
     frame = NP_BOOT_FRAMES;

@@ -103,6 +103,22 @@ void gtvid_free(void) {
 
 // Build RLE tables, prescan objects and checksums (call after ROM load,
 // before the first frame; also redo in gtvid_decode's tail).
+// Power-on: the video state as a fresh boot has it (a reset after play
+// must leave nothing behind, or two machines diverge).
+void gt_reset(void) {
+    memset(gt_pal, 0, sizeof(gt_pal));
+    memset(gt_xs, 0, sizeof(gt_xs));
+    memset(gt_ys, 0, sizeof(gt_ys));
+    memset(gt_cb, 0, sizeof(gt_cb));
+    memset(gt_tb, 0, sizeof(gt_tb));
+    cur_xs = cur_ys = 0;
+    cur_cb = cur_tb = 0;
+    memset(mo_vram, 0, sizeof(mo_vram));
+    mo_control_bits = 0;
+    mo_command = 1;
+    mo_partial = -1;
+}
+
 void gtvid_mo_init(void) {
     build_rle_tables();
     mo_prescan_all();

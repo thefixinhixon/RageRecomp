@@ -43,6 +43,7 @@ void machine_reset(void) {
     eeprom_reset();
     xga_reset();
     cage_reset();
+    gt_reset();
     if (!mach.frame_ind)
         mach.frame_ind = (uint16_t *)calloc(
                 (size_t)GT_WIDTH * GT_HEIGHT, 2);

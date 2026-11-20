@@ -22,6 +22,8 @@
 #include "video.h"
 #include "shaders.h"
 #include "version.h"
+#include "training.h"
+#include "netplay.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -186,6 +188,7 @@ static void settle_display(bool now)
 }
 
 static void draw_menu(uint32_t *ov);
+static void draw_inputs(uint32_t *ov);
 
 // Performance overlay: measured over the last second.
 static struct { double emu_ms, emu_acc, fps; int emu_n, frames; uint64_t t0; } perf;
@@ -225,8 +228,10 @@ static void draw_perf(uint32_t *out)
 
 static void present(const char *status)
 {
+    if (!status) status = training_status();
     to_rgb(px);
     osd_clear(ov);
+    draw_inputs(ov);
     draw_perf(ov);
     draw_menu(ov);
     osd_draw(ov, status);           // after the menu: messages show over it too
@@ -448,6 +453,113 @@ static bool key_held(int hk)
     return cfg.hotkeys[hk] && ks[cfg.hotkeys[hk]];
 }
 
+// Auto-coin: pressing Start without a credit drops in coins first, one at
+// a time until the game counts a credit (the default coinage takes two),
+// then presses Start. Driven entirely through the coin and start inputs,
+// so the game does its own credit bookkeeping.
+static struct { int player, coins, t, wait; bool active; } ac;
+
+static void auto_coin(uint32_t held[2])
+{
+    static uint32_t prev[2];
+    if (!ac.active && cfg.auto_coin)
+        for (int p = 0; p < 2; p++) {
+            int c = game_credits();
+            bool press = (held[p] & ~prev[p]) >> BTN_START & 1;
+            if (press && c == 0) {
+                ac.player = p; ac.coins = 0; ac.t = ac.wait = 0; ac.active = true;
+                break;
+            }
+        }
+    prev[0] = held[0]; prev[1] = held[1];
+    if (!ac.active) return;
+    // 8 frames coin down, 8 up, then up to half a second for the game to
+    // count a credit; another coin while there is none (up to 8); then 10
+    // frames of Start. Early in boot the game ignores coins: give up quietly.
+    held[ac.player] &= ~(1u << BTN_START);
+    if (ac.t < 16) {
+        if (ac.t < 8) held[ac.player] |= 1u << BTN_COIN;
+        ac.t++;
+    } else if (ac.t == 16) {
+        if (game_credits() > 0) ac.t++;
+        else if (++ac.wait > 30) {                  // not counted (yet): another coin
+            if (++ac.coins < 8) { ac.t = 0; ac.wait = 0; }
+            else ac.active = false;
+        }
+    } else if (ac.t < 16 + 11) {
+        held[ac.player] |= 1u << BTN_START;
+        ac.t++;
+    } else ac.active = false;
+}
+
+// Rumble when a player's health drops. In netplay only your own player counts.
+static void rumble_check(void)
+{
+    static int last[2] = { -1, -1 };
+    for (int p = 0; p < 2; p++) {
+        int h = game_player_is_human(p) ? game_health(p) : -1;
+        int prev = last[p];
+        last[p] = h;
+        if (!cfg.rumble || h < 0 || prev < 0 || h >= prev) continue;
+        SDL_GameController *c = NULL;
+        if (netplay_running()) { if (p == netplay_local_player()) c = pads[0]; }
+        else c = pads[p];
+        if (!c) continue;
+        int d = prev - h > 40 ? 40 : prev - h;
+        uint16_t strength = (uint16_t)(0x5000 + d * 0x2a0);
+        SDL_GameControllerRumble(c, strength, (uint16_t)(strength / 2), (uint32_t)(90 + d * 6));
+    }
+}
+
+/* ---------------------------------------------------------------- */
+/* Input display                                                    */
+/* ---------------------------------------------------------------- */
+
+#define HIST 12
+static struct { uint32_t held; int frames; } inhist[2][HIST];   // [0] is the newest
+
+static void record_inputs(const uint32_t held[2])
+{
+    const uint32_t mask = (1u << BTN_START) - 1;               // attacks and directions
+    for (int p = 0; p < 2; p++) {
+        uint32_t h = held[p] & mask;
+        if (inhist[p][0].frames && inhist[p][0].held == h) {
+            if (inhist[p][0].frames < 99) inhist[p][0].frames++;
+            continue;
+        }
+        memmove(&inhist[p][1], &inhist[p][0], (HIST - 1) * sizeof inhist[p][0]);
+        inhist[p][0].held = h;
+        inhist[p][0].frames = 1;
+    }
+}
+
+static void describe(uint32_t h, char *buf, size_t n)
+{
+    int up = h >> BTN_UP & 1, down = h >> BTN_DOWN & 1, left = h >> BTN_LEFT & 1, right = h >> BTN_RIGHT & 1;
+    int row = up ? 2 : down ? 0 : 1, col = left ? 0 : right ? 2 : 1;
+    static const char *const names[4] = { "B1", "B2", "B3", "B4" };
+    int len = snprintf(buf, n, "%d", row * 3 + col + 1);
+    for (int b = 0; b < 4; b++)
+        if (h >> (BTN_B1 + b) & 1) len += snprintf(buf + len, n - (size_t)len, " %s", names[b]);
+}
+
+static void draw_inputs(uint32_t *out)
+{
+    if (!cfg.input_display) return;
+    for (int p = 0; p < 2; p++) {
+        int y = 44;
+        osd_box(out, p ? SCR_W - 62 : 0, y - 2, 62, HIST * 9 + 3, 0x90000000u);
+        for (int i = 0; i < HIST && inhist[p][i].frames; i++, y += 9) {
+            char a[32], line[48];
+            describe(inhist[p][i].held, a, sizeof a);
+            snprintf(line, sizeof line, "%2d %s", inhist[p][i].frames, a);
+            uint32_t c = i == 0 ? 0xffffff : 0xa0a0a0;
+            int x = p ? SCR_W - 4 - (int)strlen(line) * 6 : 3;
+            osd_text(out, x, y, line, c);
+        }
+    }
+}
+
 static void set_ports(const uint32_t held[2])
 {
     uint16_t h[2] = { (uint16_t)held[0], (uint16_t)held[1] };
@@ -500,6 +612,9 @@ static void load_state(void)
     slot_path(path, sizeof path, slot());
     if (!file_readable(path)) { osd_message("State %d is empty", slot()); return; }
     if (!state_load_file(path)) { osd_message("State %d is from another version", slot()); return; }
+    state_init();                       // the history no longer applies
+    ac.active = false;
+    if (frame_count < (uint64_t)cfg.boot_skip_frames) frame_count = (uint64_t)cfg.boot_skip_frames;
     stop_audio();
     osd_message("Loaded state %d", slot());
 }
@@ -508,42 +623,58 @@ static void load_state(void)
 /* Menu                                                             */
 /* ---------------------------------------------------------------- */
 
-enum { PG_MAIN, PG_GRAPHICS, PG_PARAMS, PG_CONTROLS, PG_BIND, PG_GAME };
+enum { PG_MAIN, PG_GRAPHICS, PG_PARAMS, PG_CONTROLS, PG_BIND, PG_GAME, PG_PRACTICE, PG_NETPLAY };
 
 // Power-cycle the cabinet, as "Reset game" does. The EEPROM keeps its
 // contents, as on the board.
+static void apply_rewind_setting(void)
+{
+    state_set_history(cfg.rewind ? (size_t)(cfg.rewind_mb > 8 ? cfg.rewind_mb : 8) << 20 : 0);
+}
+
 static void hard_reset(void)
 {
     app_nvram_save();
     machine_reset();
+    state_init();
+    apply_rewind_setting();
+    ac.active = false;
     frame_count = 0;
     stop_audio();
 }
 
-enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_RESET, M_QUIT, M_COUNT };
+enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_PRACTICE, M_NETPLAY, M_RESET, M_QUIT, M_COUNT };
 enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_PERF, G_BACK, G_COUNT };
-enum { C_P1PAD, C_P2PAD, C_P1, C_P2, C_PAD, C_HOTKEYS, C_PADHOT, C_SOCD, C_DEADZONE, C_P1LABELS, C_P2LABELS, C_BACK, C_COUNT };
-enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_VERSION, S_OPERATOR, S_BACK, S_COUNT };
+enum { C_P1PAD, C_P2PAD, C_P1, C_P2, C_PAD, C_HOTKEYS, C_PADHOT, C_SOCD, C_RUMBLE, C_DEADZONE, C_P1LABELS, C_P2LABELS, C_BACK, C_COUNT };
+enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_VERSION, S_OPERATOR, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
+enum { T_TRAINING, T_REFILL, T_P2HEALTH, T_INPUTS, T_RECORD, T_PLAY, T_BACK, T_COUNT };
+enum { N_HOST, N_JOIN, N_ADDRESS, N_PORT, N_DELAY, N_DISCONNECT, N_BACK, N_COUNT };
 
 static bool menu_open, menu_changed, quit_requested;
 static int menu_page, menu_sel;
 static int bind_set;                 // PG_BIND: 0 P1 keys, 1 P2 keys, 2 pad buttons, 3 hotkeys, 4 pad hotkeys
 static int capturing = -1;           // row waiting for a key or button
 static int version_pick = -1;        // version chosen in the menu, not switched to yet
+static int editing = -1;             // N_ADDRESS or N_PORT while typing into it
+static char edit_buf[256];
+
+static bool in_netplay(void) { return netplay_running(); }
+static void not_in_netplay(void) { osd_message("Not available during netplay"); }
 
 static const char *const button_labels[NBUTTONS] = {
     "Button 1", "Button 2", "Button 3", "Button 4", "Up", "Down", "Left", "Right", "Start", "Coin",
 };
 static const char *const hotkey_labels[NHOTKEYS] = {
-    "Menu", "Pause", "Frame advance", "Fast-forward (hold)", "Save state", "Load state",
+    "Menu", "Pause", "Frame advance", "Fast-forward (hold)", "Rewind (hold)", "Save state", "Load state",
     "Next state slot", "Fullscreen", "Screenshot", "Volume up", "Volume down", "Mute",
-    "Test switch (operator)", "Performance overlay", "Quit",
+    "Test switch (operator)", "Input display", "Training mode", "Record dummy", "Play dummy",
+    "Performance overlay", "Quit",
 };
-#define NPADHOT 4
-static const char *const pad_hotkey_labels[NPADHOT] = { "Menu", "Fast-forward (hold)", "Quit", "Screenshot" };
+#define NPADHOT 5
+static const char *const pad_hotkey_labels[NPADHOT] = { "Menu", "Rewind (hold)", "Fast-forward (hold)", "Quit", "Screenshot" };
 static int *pad_hotkey(int i)
 {
-    int *const p[NPADHOT] = { &cfg.pad_menu, &cfg.pad_fast, &cfg.pad_quit, &cfg.pad_screenshot };
+    int *const p[NPADHOT] = { &cfg.pad_menu, &cfg.pad_rewind, &cfg.pad_fast, &cfg.pad_quit, &cfg.pad_screenshot };
     return p[i];
 }
 
@@ -625,6 +756,14 @@ static const char *version_label(int v)
 
 /* --- drawing --- */
 
+// Rows that don't apply to this game version.
+static bool row_hidden(int row)
+{
+    if (menu_page == PG_GAME) return row == S_AUTOCOIN && !mach_profile->credits;
+    if (menu_page == PG_MAIN) return row == M_PRACTICE && !mach_profile->fighters;
+    return false;
+}
+
 static int page_count(void)
 {
     switch (menu_page) {
@@ -633,6 +772,8 @@ static int page_count(void)
     case PG_CONTROLS: return C_COUNT;
     case PG_BIND: return (bind_set == 3 ? NHOTKEYS : bind_set == 4 ? NPADHOT : NBUTTONS) + 1;
     case PG_GAME: return S_COUNT;
+    case PG_PRACTICE: return T_COUNT;
+    case PG_NETPLAY: return N_COUNT;
     default: return M_COUNT;
     }
 }
@@ -662,6 +803,8 @@ static void draw_menu(uint32_t *out)
         snprintf(b[M_GRAPHICS], 72, "Graphics...");
         snprintf(b[M_CONTROLS], 72, "Controls...");
         snprintf(b[M_GAME], 72, "Game & system...");
+        snprintf(b[M_PRACTICE], 72, "Practice...\t%s", cfg.training ? "training on" : "");
+        snprintf(b[M_NETPLAY], 72, "Netplay...\t%s", in_netplay() ? "playing" : netplay_active() ? "connecting" : "");
         snprintf(b[M_RESET], 72, "Reset game");
         snprintf(b[M_QUIT], 72, "Quit");
         pad_prompt_footer(&pad_prompt, prompt_override(), "SELECT", "CLOSE", footer, sizeof footer);
@@ -710,6 +853,7 @@ static void draw_menu(uint32_t *out)
         snprintf(b[C_HOTKEYS], 72, "Hotkeys...");
         snprintf(b[C_PADHOT], 72, "Gamepad hotkeys...");
         snprintf(b[C_SOCD], 72, "Left+right = neutral\t%s", onoff[cfg.socd]);
+        snprintf(b[C_RUMBLE], 72, "Rumble when hit\t%s", onoff[cfg.rumble]);
         snprintf(b[C_DEADZONE], 72, "Stick deadzone\t< %d%% >", cfg.pad_deadzone * 100 / 32767);
         for (int p = 0; p < 2; p++)
             snprintf(b[p ? C_P2LABELS : C_P1LABELS], 72, "P%d button labels\t< %s%s%s >", p + 1,
@@ -749,13 +893,51 @@ static void draw_menu(uint32_t *out)
         } else if (versions_there() > 1) snprintf(b[S_VERSION], 72, "Game version\t< %s >", version_label(cur));
         else snprintf(b[S_VERSION], 72, "Game version\t%s", version_label(cur));
         snprintf(b[S_OPERATOR], 72, "Operator menu\t%s (hold)", cfg.hotkeys[HK_TEST] ? SDL_GetScancodeName(cfg.hotkeys[HK_TEST]) : "-");
+        snprintf(b[S_AUTOCOIN], 72, "Auto-coin\t%s", onoff[cfg.auto_coin]);
+        {
+            static const char *const ra_names[] = { "Off", "1 frame", "2 frames" };
+            int ra = cfg.run_ahead < 0 ? 0 : cfg.run_ahead > 2 ? 2 : cfg.run_ahead;
+            snprintf(b[S_RUNAHEAD], 72, "Run-ahead (less lag)\t< %s >", ra_names[ra]);
+        }
+        snprintf(b[S_REWIND], 72, "Rewind\t%s", onoff[cfg.rewind]);
         snprintf(b[S_BACK], 72, "Back");
         if (menu_sel == S_OPERATOR) foot = "COINAGE, FREE PLAY, DIFFICULTY: IN THE GAME'S TEST MODE";
         break;
     }
+    case PG_PRACTICE: {
+        static const char *const p2_names[] = { "Full", "Low" };
+        title = "PRACTICE";
+        snprintf(b[T_TRAINING], 72, "Training mode\t%s", onoff[cfg.training]);
+        snprintf(b[T_REFILL], 72, "Health refill\t%s", onoff[cfg.training_refill]);
+        snprintf(b[T_P2HEALTH], 72, "Player 2 health\t< %s >", p2_names[cfg.training_p2 & 1]);
+        snprintf(b[T_INPUTS], 72, "Input display\t%s", onoff[cfg.input_display]);
+        snprintf(b[T_RECORD], 72, "Record dummy (player 2)");
+        snprintf(b[T_PLAY], 72, "Play / stop dummy");
+        snprintf(b[T_BACK], 72, "Back");
+        foot = "START A 2-PLAYER GAME FOR A DUMMY";
+        break;
     }
-    for (int i = 0; i < n; i++) items[i] = b[i];
-    osd_menu(out, title, items, n, menu_sel, foot);
+    case PG_NETPLAY:
+        title = "NETPLAY";
+        snprintf(b[N_HOST], 72, "Host a game\tport %d", cfg.net_port);
+        snprintf(b[N_JOIN], 72, "Join a game");
+        if (editing == N_ADDRESS) snprintf(b[N_ADDRESS], 72, "Address\t%.40s_", edit_buf);
+        else snprintf(b[N_ADDRESS], 72, "Address\t%.40s", *cfg.net_address ? cfg.net_address : "(enter)");
+        if (editing == N_PORT) snprintf(b[N_PORT], 72, "Port\t%.10s_", edit_buf);
+        else snprintf(b[N_PORT], 72, "Port\t%d", cfg.net_port);
+        snprintf(b[N_DELAY], 72, "Input delay\t< %d frames >", cfg.net_delay);
+        snprintf(b[N_DISCONNECT], 72, netplay_active() ? "Disconnect" : "(not connected)");
+        snprintf(b[N_BACK], 72, "Back");
+        foot = editing >= 0 ? "TYPE, THEN ENTER   ESC CANCELS" : netplay_active() ? netplay_status() : foot;
+        break;
+    }
+    int shown = 0, sel = 0;
+    for (int i = 0; i < n; i++) {
+        if (row_hidden(i)) continue;
+        if (i == menu_sel) sel = shown;
+        items[shown++] = b[i];
+    }
+    osd_menu(out, title, items, shown, sel, foot);
 }
 
 /* --- actions --- */
@@ -766,6 +948,7 @@ static void menu_close(void)
     menu_page = PG_MAIN;
     capturing = -1;
     version_pick = -1;
+    if (editing >= 0) { editing = -1; SDL_StopTextInput(); }
     settle_display(true);
     if (menu_changed) {
         cfg.volume = volume;
@@ -780,6 +963,18 @@ static void cycle(int *v, int n, int dir) { *v = ((*v + dir) % n + n) % n; }
 
 static void go(int page, int sel) { menu_page = page; menu_sel = sel; capturing = -1; }
 
+static void start_join(void)
+{
+    if (!*cfg.net_address) { osd_message("Enter the host's address first"); return; }
+    char h[1024];
+    int port = cfg.net_port;
+    snprintf(h, sizeof h, "%s", cfg.net_address);
+    char *c = strrchr(h, ':');
+    if (c) { *c = 0; port = atoi(c + 1); }
+    if (netplay_join(h, port, cfg.net_delay)) osd_message("Connecting to %s...", cfg.net_address);
+    else osd_message("%s", netplay_take_error());
+}
+
 // Left/right on the selected item (dir = -1/+1), or Enter (dir = 0).
 static void menu_change(int dir)
 {
@@ -789,13 +984,20 @@ static void menu_change(int dir)
         switch (menu_sel) {
         case M_RESUME: if (!dir) menu_close(); return;
         case M_SAVE: if (!dir) { save_state(); menu_close(); } return;
-        case M_LOAD: if (!dir) { load_state(); menu_close(); } return;
+        case M_LOAD:
+            if (dir) return;
+            if (in_netplay()) not_in_netplay(); else load_state();
+            menu_close();
+            return;
         case M_SLOT: { int s = slot() - 1; cycle(&s, 9, d); cfg.state_slot = s + 1; break; }
         case M_GRAPHICS: if (!dir) go(PG_GRAPHICS, 0); return;
         case M_CONTROLS: if (!dir) go(PG_CONTROLS, 0); return;
         case M_GAME: if (!dir) go(PG_GAME, 0); return;
+        case M_PRACTICE: if (!dir) go(PG_PRACTICE, 0); return;
+        case M_NETPLAY: if (!dir) go(PG_NETPLAY, netplay_active() ? N_DISCONNECT : N_HOST); return;
         case M_RESET:
             if (dir) return;
+            if (in_netplay()) { not_in_netplay(); return; }
             hard_reset();
             menu_close();
             osd_message("Reset");
@@ -888,6 +1090,7 @@ static void menu_change(int dir)
             break;
         }
         case C_SOCD: cfg.socd = !cfg.socd; break;
+        case C_RUMBLE: cfg.rumble = !cfg.rumble; break;
         case C_DEADZONE: {
             int pct = cfg.pad_deadzone * 100 / 32767 + 5 * d;
             pct = pct < 5 ? 5 : pct > 90 ? 90 : pct;
@@ -917,6 +1120,7 @@ static void menu_change(int dir)
         case S_VERSION: {
             int cur = (int)mach_profile->id;
             if (versions_there() < 2) return;
+            if (in_netplay()) { not_in_netplay(); return; }
             if (version_pick < 0) version_pick = cur;
             if (dir) {                              // browse the versions there are
                 do version_pick = (version_pick + dir + GAME_COUNT) % GAME_COUNT;
@@ -932,7 +1136,44 @@ static void menu_change(int dir)
             return;
         }
         case S_OPERATOR: return;
+        case S_AUTOCOIN: cfg.auto_coin = !cfg.auto_coin; break;
+        case S_RUNAHEAD: cycle(&cfg.run_ahead, 3, d); break;
+        case S_REWIND: cfg.rewind = !cfg.rewind; if (!in_netplay()) apply_rewind_setting(); break;
         case S_BACK: if (!dir) go(PG_MAIN, M_GAME); return;
+        }
+        break;
+
+    case PG_PRACTICE:
+        switch (menu_sel) {
+        case T_TRAINING: if (in_netplay()) { not_in_netplay(); return; } cfg.training = !cfg.training; break;
+        case T_REFILL: cfg.training_refill = !cfg.training_refill; break;
+        case T_P2HEALTH: cfg.training_p2 = !cfg.training_p2; break;
+        case T_INPUTS: cfg.input_display = !cfg.input_display; break;
+        case T_RECORD: if (!dir) { if (in_netplay()) not_in_netplay(); else { training_record_toggle(); menu_close(); } } return;
+        case T_PLAY: if (!dir) { if (in_netplay()) not_in_netplay(); else { training_play_toggle(); menu_close(); } } return;
+        case T_BACK: if (!dir) go(PG_MAIN, M_PRACTICE); return;
+        }
+        break;
+
+    case PG_NETPLAY:
+        switch (menu_sel) {
+        case N_HOST:
+            if (dir) return;
+            if (netplay_host(cfg.net_port, cfg.net_delay)) osd_message("Hosting on port %d: waiting for a player", cfg.net_port);
+            else osd_message("%s", netplay_take_error());
+            menu_close();
+            return;
+        case N_JOIN: if (!dir) { start_join(); menu_close(); } return;
+        case N_ADDRESS: case N_PORT:
+            if (dir) return;
+            editing = menu_sel;
+            if (menu_sel == N_ADDRESS) snprintf(edit_buf, sizeof edit_buf, "%s", cfg.net_address);
+            else snprintf(edit_buf, sizeof edit_buf, "%d", cfg.net_port);
+            SDL_StartTextInput();
+            return;
+        case N_DELAY: { int v = cfg.net_delay + d; cfg.net_delay = v < 0 ? 0 : v > 4 ? 4 : v; break; }
+        case N_DISCONNECT: if (!dir && netplay_active()) { netplay_stop(); osd_message("Netplay ended"); } return;
+        case N_BACK: if (!dir) go(PG_MAIN, M_NETPLAY); return;
         }
         break;
     }
@@ -942,7 +1183,7 @@ static void menu_change(int dir)
 static void menu_toggle(void)
 {
     if (menu_open) menu_close();
-    else { menu_open = true; go(PG_MAIN, 0); stop_audio(); }
+    else { menu_open = true; go(PG_MAIN, 0); if (!in_netplay()) stop_audio(); }
 }
 
 static void menu_back(void)
@@ -954,15 +1195,46 @@ static void menu_back(void)
     case PG_GRAPHICS: go(PG_MAIN, M_GRAPHICS); break;
     case PG_CONTROLS: go(PG_MAIN, M_CONTROLS); break;
     case PG_GAME: go(PG_MAIN, M_GAME); break;
+    case PG_PRACTICE: go(PG_MAIN, M_PRACTICE); break;
+    case PG_NETPLAY: go(PG_MAIN, M_NETPLAY); break;
     }
 }
 
 static void menu_nav(int up_down, int left_right, bool enter, bool back)
 {
-    if (up_down) cycle(&menu_sel, page_count(), up_down);
+    if (up_down) {
+        int n = page_count();
+        for (int k = 0; k < n; k++) {               // skip rows this version doesn't have
+            cycle(&menu_sel, n, up_down);
+            if (!row_hidden(menu_sel)) break;
+        }
+    }
     if (left_right) menu_change(left_right);
     if (enter) menu_change(0);
     if (back) menu_back();
+}
+
+// Typing into the address or port field.
+static void edit_key(SDL_Scancode sc, const char *text)
+{
+    if (text) {
+        for (const char *c = text; *c; c++)
+            if (strlen(edit_buf) < 60 && (SDL_isalnum((unsigned char)*c) || strchr(".:-_", *c))) {
+                size_t n = strlen(edit_buf);
+                edit_buf[n] = *c;
+                edit_buf[n + 1] = 0;
+            }
+        return;
+    }
+    size_t n = strlen(edit_buf);
+    if (sc == SDL_SCANCODE_BACKSPACE && n) edit_buf[n - 1] = 0;
+    else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) {
+        if (editing == N_ADDRESS) snprintf(cfg.net_address, sizeof cfg.net_address, "%s", edit_buf);
+        else if (atoi(edit_buf) > 0 && atoi(edit_buf) < 65536) cfg.net_port = atoi(edit_buf);
+        editing = -1;
+        menu_changed = true;
+        SDL_StopTextInput();
+    } else if (sc == SDL_SCANCODE_ESCAPE) { editing = -1; SDL_StopTextInput(); }
 }
 
 // A key or pad button for the binding being captured. key = 0: pad input,
@@ -1053,8 +1325,12 @@ static bool handle_events(void)
                      b == SDL_CONTROLLER_BUTTON_A, b == SDL_CONTROLLER_BUTTON_B || b == SDL_CONTROLLER_BUTTON_START);
             break;
         }
+        case SDL_TEXTINPUT:
+            if (editing >= 0) edit_key(SDL_SCANCODE_UNKNOWN, ev.text.text);
+            break;
         case SDL_KEYDOWN: {
             SDL_Scancode sc = ev.key.keysym.scancode;
+            if (editing >= 0) { edit_key(sc, NULL); break; }
             if (menu_open && capturing >= 0) {
                 if (ev.key.repeat) break;
                 if (sc == SDL_SCANCODE_ESCAPE) capturing = -1;
@@ -1082,12 +1358,19 @@ static bool handle_events(void)
                 set_fullscreen(on);
                 menu_changed = true;
             }
+            else if (in_netplay() && (is_hotkey(sc, HK_PAUSE) || is_hotkey(sc, HK_STEP) || is_hotkey(sc, HK_LOAD_STATE) ||
+                                      is_hotkey(sc, HK_TRAINING) || is_hotkey(sc, HK_DUMMY_RECORD) || is_hotkey(sc, HK_DUMMY_PLAY)))
+                not_in_netplay();
             else if (is_hotkey(sc, HK_PAUSE)) { paused = !paused; if (paused) stop_audio(); }
             else if (is_hotkey(sc, HK_STEP)) { if (paused) step_once = true; else { paused = true; stop_audio(); } }
             else if (is_hotkey(sc, HK_SAVE_STATE)) save_state();
             else if (is_hotkey(sc, HK_LOAD_STATE)) load_state();
             else if (is_hotkey(sc, HK_NEXT_SLOT)) { cfg.state_slot = slot() % 9 + 1; osd_message("State slot %d", slot()); }
             else if (is_hotkey(sc, HK_SCREENSHOT)) screenshot();
+            else if (is_hotkey(sc, HK_TRAINING)) { cfg.training = !cfg.training; osd_message("Training mode %s", cfg.training ? "on" : "off"); }
+            else if (is_hotkey(sc, HK_DUMMY_RECORD)) training_record_toggle();
+            else if (is_hotkey(sc, HK_DUMMY_PLAY)) training_play_toggle();
+            else if (is_hotkey(sc, HK_INPUT_DISPLAY)) { cfg.input_display = !cfg.input_display; osd_message("Input display %s", cfg.input_display ? "on" : "off"); }
             else if (is_hotkey(sc, HK_PERF)) { cfg.perf_overlay = !cfg.perf_overlay; menu_changed = true; }
             else if (is_hotkey(sc, HK_VOL_UP)) set_volume(volume + 10);
             else if (is_hotkey(sc, HK_VOL_DOWN)) set_volume(volume - 10);
@@ -1106,16 +1389,78 @@ static bool handle_events(void)
 }
 
 // One real frame of the game: inputs, then emulation.
+static double last_emu_ms;          // how long the last real frame took to emulate
+
+// One real frame of the game: inputs, emulation, and a checkpoint for
+// rollback/rewind. Every emulated frame must end in a checkpoint.
 static void emulate_frame(void)
 {
     uint64_t t0 = SDL_GetPerformanceCounter();
     uint32_t held[2];
     read_players(held);
+    training_inputs(held);
+    auto_coin(held);
+    record_inputs(held);
     set_ports(held);
+    training_apply(true);
     machine_frame();
+    state_checkpoint();
     frame_count++;
+    rumble_check();
     perf_emu(t0);
+    last_emu_ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
 }
+
+// Show the frame `run_ahead` frames in the future (same inputs), then
+// return to the real one: input shows sooner on screen.
+static void present_ahead(int n)
+{
+    if (n <= 0) { present(NULL); return; }
+    for (int k = 0; k < n; k++) { training_apply(false); machine_frame(); pump_audio(true, 1); }
+    present(NULL);
+    state_rollback();
+}
+
+/* ---------------------------------------------------------------- */
+/* Netplay glue                                                     */
+/* ---------------------------------------------------------------- */
+
+static void np_run(const uint16_t in[2], bool resim)
+{
+    if (!resim) {
+        uint32_t h[2] = { in[0], in[1] };
+        record_inputs(h);
+        frame_count++;
+    }
+    machine_run_inputs(in, resim);
+    if (!resim) rumble_check();
+}
+
+static void np_reset(void)
+{
+    osd_message("Netplay: syncing...");
+    present("NETPLAY");
+    stop_audio();
+    paused = step_once = false;
+    machine_netplay_reset();
+    ac.active = false;
+    memset(inhist, 0, sizeof inhist);
+}
+
+// Your controls (either keyboard side, either pad) drive your player.
+static uint16_t netplay_input(void)
+{
+    if (menu_open) return 0;
+    uint32_t held[2];
+    read_players(held);
+    int me = netplay_local_player();
+    uint32_t h[2] = { 0, 0 };
+    h[me] = held[0] | held[1];
+    auto_coin(h);
+    return (uint16_t)h[me];
+}
+
+const char *opt_net_host, *opt_net_join;     // from the command line (main.c)
 
 static bool apply_shader(void)
 {
@@ -1245,13 +1590,45 @@ int frontend_main(void)
     if (opt_test_shaders) { int r = test_shaders(); video_close(); SDL_Quit(); return r; }
     prepare_game_code();
     apply_shader();
+    state_init();
+    apply_rewind_setting();
+    netplay_set_callbacks(np_run, np_reset);
+    if (opt_net_host) {
+        int port = *opt_net_host ? atoi(opt_net_host) : cfg.net_port;
+        if (netplay_host(port, cfg.net_delay)) osd_message("Hosting on port %d: waiting for a player", port);
+    } else if (opt_net_join) {
+        snprintf(cfg.net_address, sizeof cfg.net_address, "%s", opt_net_join);
+        start_join();
+    }
+    bool was_netplay = false;
 
     uint64_t freq = SDL_GetPerformanceFrequency();
     uint64_t next = SDL_GetPerformanceCounter();
     uint32_t last_nvram = SDL_GetTicks();
     while (handle_events()) {
-        bool fast = key_held(HK_FAST) || pad_held(cfg.pad_fast);
+        const char *nerr = netplay_take_error();
+        if (nerr) osd_message("%s", nerr);
+        if (netplay_running()) {
+            // the game never pauses: both sides run at the arcade's rate, timed by audio
+            if (!was_netplay) { was_netplay = true; vsync = false; video_set_vsync(false); osd_message("Netplay: you are player %d", netplay_local_player() + 1); }
+            uint64_t t0 = SDL_GetPerformanceCounter();
+            netplay_update(netplay_input());
+            perf_emu(t0);
+            pump_audio(false, 1);
+            present(netplay_status());
+            if (adev) while (queued_ms() > latency) SDL_Delay(1);
+            else SDL_Delay(16);
+            continue;
+        }
+        if (was_netplay) { was_netplay = false; choose_pacing(); apply_rewind_setting(); }
+        if (netplay_active()) {                        // connecting: keep playing locally meanwhile
+            netplay_update(0);
+            if (netplay_running()) continue;           // the session just reset the machine: no local frame
+        }
         if (SDL_GetTicks() - last_nvram > 10000) { app_nvram_save(); last_nvram = SDL_GetTicks(); }
+        bool booting = frame_count < (uint64_t)cfg.boot_skip_frames;
+        bool fast = key_held(HK_FAST) || pad_held(cfg.pad_fast) || booting;
+        bool rewinding = cfg.rewind && (key_held(HK_REWIND) || pad_held(cfg.pad_rewind));
 
         if (menu_open || (paused && !step_once) || (!focused && cfg.pause_unfocused)) {
             present(menu_open ? NULL : "PAUSED");
@@ -1266,6 +1643,15 @@ int frontend_main(void)
             present("PAUSED");
             continue;
         }
+        if (rewinding && !booting) {
+            // one checkpoint back per display frame: rewinds at normal speed
+            bool more = state_rewind();
+            stop_audio();
+            present(more ? "<< REWIND" : "REWIND: NO MORE HISTORY");
+            if (!vsync) SDL_Delay((uint32_t)(1000 / FRAME_HZ));
+            next = SDL_GetPerformanceCounter();
+            continue;
+        }
         if (fast) {
             // run unthrottled (or up to the speed limit) for one display frame, silently
             uint64_t start = SDL_GetPerformanceCounter(), budget = freq / 60;
@@ -1275,7 +1661,7 @@ int frontend_main(void)
                 pump_audio(true, 1);
             }
             stop_audio();
-            present(">> FAST");
+            present(booting ? "" : ">> FAST");
             if (!vsync) {
                 uint64_t now = SDL_GetPerformanceCounter();
                 if (now - start < budget) SDL_Delay((uint32_t)((budget - (now - start)) * 1000 / freq));
@@ -1283,6 +1669,12 @@ int frontend_main(void)
             next = SDL_GetPerformanceCounter();
             continue;
         }
+        int ahead = cfg.run_ahead < 0 ? 0 : cfg.run_ahead > 2 ? 2 : cfg.run_ahead;
+        // Run-ahead multiplies the cost of a frame: when one gets too heavy
+        // it's paused for a second rather than starving the audio.
+        static int ahead_paused;
+        if (ahead && last_emu_ms * (ahead + 1) > 0.8 * 1000 / FRAME_HZ) ahead_paused = 60;
+        if (ahead_paused) { ahead_paused--; ahead = 0; }
         if (vsync) {
             if (!vsync_lock) {
                 // vsync on a display that isn't ~60 Hz: tear-free, but a frame
@@ -1307,11 +1699,11 @@ int frontend_main(void)
             if (err < -1) err = -1;
             // locked: frames come display_hz times a second, so resample to match
             pump_audio(false, (vsync_lock ? display_hz / FRAME_HZ : 1) * (1 + 0.005 * err));
-            present(NULL);
+            present_ahead(ahead);
         } else {
             emulate_frame();
             pump_audio(false, 1);
-            present(NULL);
+            present_ahead(ahead);
             if (adev) {
                 // the audio device is the clock: keep `latency` ms queued
                 while (queued_ms() > latency) SDL_Delay(1);
@@ -1323,6 +1715,7 @@ int frontend_main(void)
             }
         }
     }
+    netplay_stop();
     if (menu_changed) menu_close();
     settle_display(true);
     if (!fullscreen) {

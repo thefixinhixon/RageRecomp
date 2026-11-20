@@ -36,12 +36,15 @@ static const char *const p2_keys[NBUTTONS] = { "N", "M", ",", ".", "Keypad 8", "
 static const char *const pad_defaults[NBUTTONS] = {
     "x", "y", "a", "b", "dpup", "dpdown", "dpleft", "dpright", "start", "back",
 };
+static const char *const p2_health_names[] = { "full", "low", 0 };
 static const char *const hotkey_names[NHOTKEYS] = {
-    "menu", "pause", "frame_advance", "fast_forward", "save_state", "load_state", "next_slot",
-    "fullscreen", "screenshot", "volume_up", "volume_down", "mute", "test", "performance", "quit",
+    "menu", "pause", "frame_advance", "fast_forward", "rewind", "save_state", "load_state", "next_slot",
+    "fullscreen", "screenshot", "volume_up", "volume_down", "mute", "test",
+    "input_display", "training", "dummy_record", "dummy_play", "performance", "quit",
 };
 static const char *const hotkey_defaults[NHOTKEYS] = {
-    "F1", "P", "/", "Tab", "F5", "F9", "F6", "F11", "F12", "=", "-", "M", "F2", "F10", "",
+    "F1", "P", "/", "Tab", "Backspace", "F5", "F9", "F6", "F11", "F12", "=", "-", "M", "F2",
+    "F3", "F4", "F7", "F8", "F10", "",
 };
 
 #define MAX_OPTS 256
@@ -96,8 +99,26 @@ static void build_table(void)
 
     add("system", "pause_unfocused", T_BOOL, &cfg.pause_unfocused, "no", "pause while the window is in the background", 0);
     add("system", "mute_unfocused", T_BOOL, &cfg.mute_unfocused, "no", "mute while the window is in the background", 0);
+    add("system", "boot_skip_frames", T_INT, &cfg.boot_skip_frames, "0",
+        "fast-forward this many frames at startup (0 = the arcade's own boot; 300 = past the boot tests)", 0);
+    add("system", "auto_coin", T_BOOL, &cfg.auto_coin, "yes", "Start inserts coins when there are not enough credits", 0);
     add("system", "fast_forward_speed", T_INT, &cfg.fast_speed, "0", "fast-forward limit in x realtime, 0 = as fast as possible", 0);
+    add("system", "run_ahead", T_INT, &cfg.run_ahead, "0",
+        "0-2: emulate ahead to show input sooner; the arcade game reads input the frame it comes, so 0 is as it played", 0);
+    add("system", "rewind", T_BOOL, &cfg.rewind, "yes", "keep a rewind history (hold the rewind hotkey)", 0);
+    add("system", "rewind_mb", T_INT, &cfg.rewind_mb, "256", "memory for it; about 26 KB per frame in a fight (256 MB = ~2.5 min)", 0);
+    add("system", "input_display", T_BOOL, &cfg.input_display, "no", "show both players' recent inputs (numpad notation)", 0);
+    add("system", "training", T_BOOL, &cfg.training, "no",
+        "training mode: health refills after each combo, the clock stops (start a 2-player game for a dummy)", 0);
+    add("system", "training_refill", T_BOOL, &cfg.training_refill, "yes",
+        "training mode refills health after each combo (no: health stays down, the clock still stops)", 0);
+    add("system", "training_p2_health", T_ENUM, &cfg.training_p2, "full",
+        "training mode, player 2: full, or low (20 of 120 left, to practise finishing)", p2_health_names);
     add("system", "state_slot", T_INT, &cfg.state_slot, "1", "save state slot used by the hotkeys, 1-9", 0);
+    add_str("netplay", "address", cfg.net_address, "", "host to join (name or IP, optionally :port)");
+    add("netplay", "port", T_INT, &cfg.net_port, "7845", "UDP port to host on (forward it on your router, or use a VPN such as Tailscale)", 0);
+    add("netplay", "input_delay", T_INT, &cfg.net_delay, "2",
+        "frames before your input takes effect; more = fewer rollbacks. 1-2 for nearby players, 3-4 far away", 0);
 
     for (int p = 0; p < 2; p++)
         for (int b = 0; b < NBUTTONS; b++) {
@@ -113,7 +134,8 @@ static void build_table(void)
         add("hotkeys", hotkey_names[h], T_KEY, &cfg.hotkeys[h], hk_keys[h],
             h == HK_MENU ? "settings menu (Esc also opens it, unless a launcher started the game: then Esc quits)" :
             h == HK_QUIT ? "quit at once, e.g. for launchers that close the game with a key" : h == HK_FAST ? "hold to fast-forward" :
-            h == HK_STEP ? "while paused, advance one frame" :
+            h == HK_STEP ? "while paused, advance one frame" : h == HK_REWIND ? "hold to rewind" :
+            h == HK_DUMMY_RECORD ? "training: record player 2's actions with your controls" :
             h == HK_TEST ? "the cabinet's self-test switch: hold for the operator menu (coinage, free play, difficulty)" : 0, 0);
     }
     for (int b = 0; b < NBUTTONS; b++) {
@@ -129,7 +151,9 @@ static void build_table(void)
         "button labels: auto, xbox, playstation, switch, positions; bindings stay unchanged", family_names);
     add("gamepad", "p2_labels", T_ENUM, &cfg.pad_family[1], "auto", "player 2 button labels", family_names);
     add("gamepad", "deadzone", T_INT, &cfg.pad_deadzone, "16000", "left stick deadzone, 0-32767", 0);
+    add("gamepad", "rumble", T_BOOL, &cfg.rumble, "yes", "vibrate when your fighter is hit", 0);
     add("gamepad", "menu", T_PAD, &cfg.pad_menu, "guide", "hotkeys on the pad (Back+Start also opens the menu)", 0);
+    add("gamepad", "rewind", T_PAD, &cfg.pad_rewind, "", "hold to rewind, e.g. leftshoulder", 0);
     add("gamepad", "fast_forward", T_PAD, &cfg.pad_fast, "", "hold to fast-forward, e.g. lefttrigger", 0);
     add("gamepad", "quit", T_PAD, &cfg.pad_quit, "", "quit at once (holding Back+Start for 2 seconds also quits)", 0);
     add("gamepad", "screenshot", T_PAD, &cfg.pad_screenshot, "", "save a screenshot, e.g. leftstick", 0);

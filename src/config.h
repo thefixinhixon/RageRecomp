@@ -4,8 +4,9 @@
 #include <stdbool.h>
 #include "controls.h"
 
-enum { HK_MENU, HK_PAUSE, HK_STEP, HK_FAST, HK_SAVE_STATE, HK_LOAD_STATE, HK_NEXT_SLOT,
+enum { HK_MENU, HK_PAUSE, HK_STEP, HK_FAST, HK_REWIND, HK_SAVE_STATE, HK_LOAD_STATE, HK_NEXT_SLOT,
        HK_FULLSCREEN, HK_SCREENSHOT, HK_VOL_UP, HK_VOL_DOWN, HK_MUTE, HK_TEST,
+       HK_INPUT_DISPLAY, HK_TRAINING, HK_DUMMY_RECORD, HK_DUMMY_PLAY,
        HK_PERF, HK_QUIT, NHOTKEYS };
 
 enum { SCALE_FIT, SCALE_INTEGER, SCALE_STRETCH };
@@ -34,9 +35,21 @@ typedef struct {
     int  volume;               // 0-100
     int  audio_latency_ms;
 
+    int  boot_skip_frames;     // run this many frames unthrottled and silent at startup
+    bool auto_coin;
     int  fast_speed;           // fast-forward speed limit, x realtime (0 = unlimited)
+    int  run_ahead;            // frames (0-2) emulated ahead to show input sooner
+    bool rewind;
+    int  rewind_mb;            // memory for the rewind history
     int  state_slot;           // 1-9
+    bool input_display;
     bool perf_overlay;
+    bool training;             // health refill + clock held
+    bool training_refill;      // training refills health (else only the clock stops)
+    int  training_p2;          // player 2's health in training: 0 full, 1 low
+    char net_address[1024];    // last host joined
+    int  net_port;
+    int  net_delay;            // frames of input delay (0-4)
     bool pause_unfocused, mute_unfocused;
 
     SDL_Scancode keys[2][NBUTTONS];
@@ -46,7 +59,8 @@ typedef struct {
     char pad_choice[2][128];   // each player's controller, by name; empty = connection order
     int  pad_deadzone;         // 0-32767
     bool socd;                 // left+right = neutral, up+down = up (keyboards, hitboxes)
-    int  pad_menu, pad_fast, pad_quit, pad_screenshot;   // gamepad hotkeys (PAD_NONE = unbound)
+    bool rumble;
+    int  pad_menu, pad_rewind, pad_fast, pad_quit, pad_screenshot;   // gamepad hotkeys (PAD_NONE = unbound)
 } config_t;
 
 extern config_t cfg;

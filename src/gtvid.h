@@ -16,6 +16,8 @@ void gtvid_decode(void);
 void gtvid_free(void);
 // RLE tables, object prescan and checksums (also run by gtvid_decode).
 void gtvid_mo_init(void);
+// Power-on reset of the video state.
+void gt_reset(void);
 // Vblank hook: finish a pending MO erase, reset the partial line.
 void gt_mo_vblank(void);
 

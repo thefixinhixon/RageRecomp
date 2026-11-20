@@ -77,11 +77,13 @@ to players there.
 | Menu | Esc or F1 (gamepad: Guide, or Back+Start) |
 | Operator menu (the cabinet's test switch, hold) | F2 |
 | Pause / frame advance | P / `/` |
-| Fast-forward (hold) | Tab |
+| Fast-forward (hold) / rewind (hold) | Tab / Backspace |
 | Save state / load state / next slot | F5 / F9 / F6 |
 | Fullscreen | F11 or Alt+Enter |
 | Screenshot | F12 |
 | Volume up / down / mute | `=` / `-` / M |
+| Input display / training mode | F3 / F4 |
+| Record dummy / play dummy (training) | F7 / F8 |
 | Performance overlay | F10 |
 | Quit | the menu, or hold Back+Start on a pad for 2 seconds |
 
@@ -100,9 +102,28 @@ power-cycles the cabinet and keeps them, as the real board does.
 
 The menu has save states, Graphics (fullscreen, display mode, window size,
 scaling, shader and its parameters, frame pacing, performance overlay),
-Controls (keys, gamepad buttons, hotkeys, which pad each player uses, stick
-deadzone, button labels), and Game & system (volume, background behaviour,
-game version).
+Controls (keys, gamepad buttons, hotkeys, which pad each player uses,
+rumble, stick deadzone, button labels), Game & system (volume, background
+behaviour, game version, auto-coin, run-ahead, rewind), Practice and
+Netplay.
+
+- **Rewind**: hold Backspace (or a pad button set in the menu); about 26 KB
+  per frame of history, 256 MB by default.
+- **Run-ahead** (0-2 frames): shows the result of your input sooner by
+  emulating ahead and rolling back each frame.
+- **Auto-coin**: Start with no credits drops in coins (the default coinage
+  takes two per credit), then starts.
+- **Practice**: training mode refills health after each combo and holds the
+  round clock; player 2 can be kept low to practise finishing; a player 2
+  dummy can be recorded with your own controls and played back; an input
+  display shows both players' recent inputs in numpad notation.
+- **Netplay**: two players over UDP with rollback (as UltraCombo): one hosts
+  (Menu > Netplay, or `--host [PORT]`), the other joins (`--join
+  HOST[:PORT]`); input delay 1-4 frames. Both must run the same game
+  version; the host's operator settings apply to both. Forward the UDP
+  port, or use a VPN such as Tailscale.
+- **Rumble** when your fighter is hit.
+- `[system] boot_skip_frames` fast-forwards the boot tests at startup.
 
 Settings live in `ragerecomp.ini`, written with comments on first run. Any
 of them can be given once on the command line: `--set section.key=value`,
@@ -165,7 +186,9 @@ ragerecomp-headless --roms run --frames 3600 \
 tools/regress.sh build-lnx/ragerecomp-headless primrage   # boot, coin-up, fight; prints the hash
 ```
 
-`--shot`, `--wav`, `--save-at`, `--load` and `--nvram` are in `--help`.
+`--shot`, `--wav`, `--save-at`, `--load`, `--nvram`, `--rewind-test`,
+`--runahead`, `--shot-every`, `--trace`, `--dis` and the headless netplay
+tests (`--net-host`, `--net-join`) are in `--help`.
 Translated and interpreted runs (`RR_NOREC=1 RR_NODSP=1`) give the same
 hash. CLAUDE.md lists the debugging variables.
 
@@ -193,7 +216,13 @@ tag builds them on GitHub Actions into a draft release.
 
 ## Status and known issues
 
-- No rewind, run-ahead or netplay.
+- The game's own settings (difficulty, free play, coinage) are changed in
+  its operator menu (F2): they live in the cabinet's EEPROM behind the
+  game's own error-correcting writer, so the program doesn't edit them.
+- Training mode holds the round clock by setting it back each second, so
+  its last digit blinks once a second.
+- Which fighter is the computer's is known on the Jan 1995 version only;
+  on the older ones rumble treats both as players.
 - What is emulated, translated and verified is tracked in CLAUDE.md
   ("Status"). If the game desyncs, mis-renders or goes silent, the log and
   the regression hash are the first things to compare.

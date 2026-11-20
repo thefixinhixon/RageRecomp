@@ -44,7 +44,10 @@ The game's ROMs and code are copyrighted. This repo is public.
 | Video, OpenGL, shader presets | `video.c/h`, `shaders.c/h`, `gl_funcs.h` |
 | Icon (drawn in code) and PNG writer | `icon.c/h`, `png.c/h` |
 | Welcome screen (no game files) and message window | `picker.c/h` |
-| Program entry, CLI, game version, NVRAM, headless runs | `main.c`, `app.h` |
+| Program entry, CLI, game version, NVRAM, headless runs and test tools | `main.c`, `app.h` |
+| Cabinet controls to ports per set (frontend, scripts, netplay) | `controls.c/h` |
+| Training mode, health/credits from game RAM (`game.h` locations) | `training.c/h` |
+| Rollback netplay over UDP (EEPROM synced instead of KI's disk) | `netplay.c/h`, `net.c/h` |
 | `base_dir()`/`data_dir()`/`find_data()` (no SDL: the headless program too) | `paths.c/h` |
 | Started with a game path (a set's zip or a folder): its folder is searched first | `launch.c/h` |
 | Packaging | `tools/package.sh`, `tools/fetch-deps.sh`, `src/ragerecomp.rc`, `.github/workflows/release.yml` |
@@ -186,6 +189,11 @@ Useful environment variables:
 - `RR_VIRTUAL_PADS="Name,?Name"`: attach SDL virtual gamepads (testing).
 - `RR_NO_GL=1`: the SDL renderer instead of OpenGL. `RR_CONSOLE=1`: on
   Windows, keep the log on the console instead of `ragerecomp.log`.
+- As UltraCombo's `KI2_*`: `RR_DUMP_AT=F[,F...]` (RAM dumps), `RR_POKE=
+  F:ADDR:VAL`, `RR_WAV`, `RR_SPEED`, `RR_HISTORY`, `RR_RESET_TEST=N` (a
+  reset after N frames must equal a fresh power-on), `RR_DESYNC_AT`
+  (netplay), `RR_DUMP_ON_EXC`, `RR_COVER` (interpreter coverage),
+  `RR_TRAINING=F` (windowed program's headless mode).
 - `RR_LOG_FRAME=2`: 68K position after every scanline (for bisecting a
   divergence between two runs); `RR_DUMP_DSP=file`: the DSP image the
   translator planned from.
@@ -233,13 +241,22 @@ read with `getenv` in `src/` (grep them for details).
   TinyCC under Wine, and the linked-in build.
 - GT video, CAGE audio path (music and effects play; the opening attract
   is quiet in MAME too), protection, EEPROM (persisted per set): from MAME.
-- Frontend (from UltraCombo): menu, ragerecomp.ini, OpenGL with built-in
-  filters and libretro presets, gamepads with assignment and labels, save
-  states, screenshots, pacing, welcome screen, launcher paths. Played
-  under Xvfb (menu, filter change, coin-up and a won round from the
-  keyboard, save/load state, screenshot, quit). Not here: rewind,
-  run-ahead, netplay, auto-coin, rumble, training (UltraCombo has them;
-  they need KI-specific RAM knowledge or code not ported).
+- Frontend (from UltraCombo, feature for feature): menu, ragerecomp.ini,
+  OpenGL with filters and libretro presets, gamepads with assignment,
+  labels and rumble, save states, rewind, run-ahead, boot skip, auto-coin,
+  training mode with dummy record/play, input display, rollback netplay,
+  screenshots, pacing, welcome screen, launcher paths. Not applicable to
+  this hardware: KI's DIP switches (blood, finishing moves), disk speed,
+  cabinet volume buttons, service credit; difficulty/free play stay in the
+  game's operator menu (EEPROM with the game's own ECC writer).
+- Game RAM (traced with RR_DUMP_AT; `game.c`): credits, round clock,
+  fighter records (damage taken at +0x5A, 8.8, KO at 0x7800), players
+  bitmask (Jan only).
+- Verified: rewind-and-replay and 2-frame run-ahead match the plain run;
+  netplay between two processes (40 +-15 ms, 5% loss) and two windows
+  stays in sync; reset after play equals a fresh power-on; training
+  refills health and holds the clock; auto-coin starts a game; save/load
+  round-trips; controller-label test passes (93 checks).
 - Game versions: all three played to a fight (primrageo/primrage20 start
   with button 1), each with zero interpreted instructions and translated
   = interpreted hashes over the scripted 3600 frames (primrageo

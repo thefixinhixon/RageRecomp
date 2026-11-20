@@ -40,6 +40,14 @@ typedef struct {
     // fills missing tail ROMs by number from primrage.zip).
     rom_file_t rle[32];
     int rle_count;          // ROMs listed for this set
+    // Game RAM locations (68K addresses; found by tracing scripted runs,
+    // the fighter records as in the research notes). 0 = not known.
+    uint32_t credits;       // credit count (word)
+    uint32_t timer;         // round clock, whole seconds (byte; 0 outside a fight)
+    uint32_t fighters;      // fighter records, one per player...
+    uint32_t fighter_step;  // ...this far apart; damage taken is the word at
+                            // +0x5A, 8.8, a KO at 120 (0x7800)
+    uint32_t players;       // bitmask of players in the game (bit 0 = P1)
 } game_profile_t;
 
 const game_profile_t *game_profile(game_id_t id);

@@ -41,6 +41,7 @@
 #include "config.h"
 #include "icon.h"
 #include "picker.h"
+#include "training.h"
 #endif
 
 static const char *roms_dir;        // --roms or the [game] roms setting
@@ -63,6 +64,8 @@ static void usage(void) {
            "  --set SECTION.KEY=VALUE  any setting of ragerecomp.ini, e.g.\n"
            "                  --set video.filter=crt (this session only)\n"
            "  --test-shaders  load and draw every shader preset, report each\n"
+           "  --host [PORT]   host a netplay game (default port from ragerecomp.ini, 7845)\n"
+           "  --join HOST[:PORT]  join a netplay game\n"
 #endif
            "Headless (no window, no audio device):\n"
            "  --headless N    run N frames (also --frames N)\n"
@@ -436,6 +439,12 @@ static int run_headless(const headless_t *o) {
         if (o->trace_from && f == o->trace_from) m68k_trace = 1;
         if (nscript) script_frame(f - 1);
         apply_pokes(f);
+#ifdef RR_SDL
+        if (getenv("RR_TRAINING") && f >= atoi(getenv("RR_TRAINING"))) {   // testing: from frame N
+            cfg.training = true;
+            training_apply(true);
+        }
+#endif
         machine_frame();
         state_checkpoint();
         if (o->runahead) {
@@ -657,15 +666,16 @@ void app_restart(void) {
 /* ---------------------------------------------------------------- */
 
 // Options followed by values: skipped when looking for a launcher's PATH.
-static int option_values(const char *a) {
+static int option_values(const char *a, const char *next) {
     static const char *const one[] = { "--roms", "--game-version", "--data-dir", "--set",
         "--headless", "--frames", "--script", "--shot", "--wav", "--load", "--nvram",
         "--emit-linked", "--shot-every", "--rewind-test", "--runahead", "--trace-from",
-        "--net-host", "--net-join", "--net-delay", "--net-fps", "--net-sim", "--host", "--join", NULL };
+        "--net-host", "--net-join", "--net-delay", "--net-fps", "--net-sim", "--join", NULL };
     int i;
     for (i = 0; one[i]; i++)
         if (!strcmp(a, one[i])) return 1;
     if (!strcmp(a, "--save-at") || !strcmp(a, "--dis")) return 2;
+    if (!strcmp(a, "--host")) return next && next[0] != '-';     // the port is optional
     return 0;
 }
 
@@ -706,7 +716,7 @@ int main(int argc, char **argv) {
                 !strcmp(argv[i], "--emit-linked") || !strcmp(argv[i], "--dis")) && i + 1 < argc)
             headless_mode = 1;
         if (argv[i][0] != '-' && !launch_path) launch_path = argv[i];
-        i += option_values(argv[i]);
+        i += option_values(argv[i], i + 1 < argc ? argv[i + 1] : NULL);
     }
 #ifndef RR_SDL
     headless_mode = 1;
@@ -745,7 +755,7 @@ int main(int argc, char **argv) {
                 config_override(argv[i][2] == 'f' ? "video.fullscreen=yes" : "video.fullscreen=no");
                 screen_given = 1;
             } else {
-                i += option_values(argv[i]);
+                i += option_values(argv[i], i + 1 < argc ? argv[i + 1] : NULL);
             }
         }
         if (!screen_given && mode && !strcmp(mode, "bigpicture")) config_override("video.fullscreen=yes");
@@ -794,6 +804,13 @@ int main(int argc, char **argv) {
         else if ((!strcmp(argv[i], "--data-dir") || !strcmp(argv[i], "--set")) && i + 1 < argc) i++;
         else if (!strcmp(argv[i], "--fullscreen") || !strcmp(argv[i], "--windowed")) {}
         else if (!strcmp(argv[i], "--test-shaders")) { extern int opt_test_shaders; opt_test_shaders = 1; }
+        else if (!strcmp(argv[i], "--host")) {
+            extern const char *opt_net_host;
+            opt_net_host = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "";
+        } else if (!strcmp(argv[i], "--join") && i + 1 < argc) {
+            extern const char *opt_net_join;
+            opt_net_join = argv[++i];
+        }
 #else
         else if (!strcmp(argv[i], "--data-dir") && i + 1 < argc) i++;
 #endif
@@ -883,6 +900,7 @@ int main(int argc, char **argv) {
             machine_reset();
             fprintf(stderr, "after reset: hash %016llx quick %016llx\n",
                     (unsigned long long)state_hash(), (unsigned long long)state_quick_hash());
+            state_save_file("reset_state.bin");     // to compare with a fresh power-on's
             return 0;
         }
         {

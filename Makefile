@@ -62,7 +62,8 @@ SDL_LIBS ?= $(shell pkg-config --libs sdl2 2>/dev/null)
 
 # The windowed frontend (SDL2 + OpenGL), adapted from UltraCombo's.
 FRONT_SRCS = src/frontend.c src/config.c src/osd.c src/video.c \
-    src/shaders.c src/png.c src/icon.c src/controller_labels.c src/picker.c
+    src/shaders.c src/png.c src/icon.c src/controller_labels.c src/picker.c \
+    src/training.c
 FRONT_OBJS = $(patsubst %.c,$(OUTDIR)/%.o,$(FRONT_SRCS))
 
 # Linked-in game code (make recomp): build/rec/*.c from your own ROMs.
@@ -112,11 +113,19 @@ $(OUTDIR)/src/main_sdl.o: src/main.c $(OUTDIR)/gen/rec_headers.h
 $(OUTDIR)/t_%$(EXE): tests/t_%.c $(CORE_OBJS) | $(OUTDIR)/gen/rec_headers.h
 	$(CC) $(CFLAGS) $(WFLAGS) -Itests $(INCS) $< $(CORE_OBJS) -o $@ $(LDFLAGS) $(SYSLIBS)
 
-tests: $(TEST_BINS)
+tests: $(TEST_BINS) $(if $(filter yes,$(HAVE_SDL)),$(OUTDIR)/test_controller_labels$(EXE))
 	@fail=0; for t in $(TEST_BINS); do \
 	    echo "== $$t"; \
 	    (cd $(CURDIR) && ./$$t) || fail=1; \
-	done; exit $$fail
+	done; \
+	if [ -x $(OUTDIR)/test_controller_labels$(EXE) ]; then echo "== controller labels"; \
+	    SDL_VIDEODRIVER=dummy ./$(OUTDIR)/test_controller_labels$(EXE) $(OUTDIR)/test-labels.ini || fail=1; fi; \
+	exit $$fail
+
+# Controller labels and their settings (SDL virtual pads, no display).
+$(OUTDIR)/test_controller_labels$(EXE): tests/test_controller_labels.c src/controller_labels.c src/config.c src/*.h
+	$(CC) $(CFLAGS) $(WFLAGS) $(INCS) -DRR_SDL $(SDL_CFLAGS) tests/test_controller_labels.c \
+	    src/controller_labels.c src/config.c -o $@ $(SDL_LIBS)
 
 # Developer build with the game code linked in: translate your own ROMs
 # into build/rec (game-derived: never commit or share it), then link it

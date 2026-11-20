@@ -99,6 +99,8 @@ void cage_reset(void) {
     cage.from_main = cage.control = cage.latch = 0;
     cage.cpu_to_cage = cage.cage_to_cpu = 0;
     cage.pend_hd = cage.pend_tl = cage.vis_hd = cage.vis_tl = 0;
+    memset(cage.pend, 0, sizeof(cage.pend));
+    memset(cage.vis, 0, sizeof(cage.vis));
     cage.dma_enabled = cage.dma_timer_on = 0;
     cage.dma_end_cyc = 0;
     cage.dma_end_addr = 0;
