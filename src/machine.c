@@ -118,6 +118,7 @@ void machine_frame(void) {
             mach.irq6_cyc += M68K_HZ / 250;
             mem_set_scanline(1);
         }
+        cage_scanline_swap();
         rrm->cpu->cycles = (int32_t)(k1 - k0);
         rec_run_main();
         if (!cage.dsp_held) {

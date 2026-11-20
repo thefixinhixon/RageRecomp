@@ -6,5 +6,5 @@
 // Must differ between builds that emulate differently: bump the low word
 // on any emulation change outside the translators (translator changes
 // already move RECOMP_VERSION, which is folded in here).
-#define STATE_FORMAT 1u
+#define STATE_FORMAT 2u
 uint32_t state_compat_id(void);

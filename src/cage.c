@@ -76,11 +76,29 @@ void cage_map_pages(void) {
     }
 }
 
+void cage_scanline_swap(void) {
+    // Publish pending commands in FIFO order; the DSP drains them with
+    // one latch read each, so bursts are never coalesced away.
+    while (cage.pend_hd != cage.pend_tl) {
+        uint8_t ntl = (uint8_t)((cage.vis_tl + 1) & 63);
+        if (ntl == cage.vis_hd) break; // visible full: keep rest pending
+        cage.vis[cage.vis_tl] = cage.pend[cage.pend_hd];
+        cage.vis_tl = ntl;
+        cage.pend_hd = (uint8_t)((cage.pend_hd + 1) & 63);
+    }
+    if (cage.vis_hd != cage.vis_tl) {
+        cage.cpu_to_cage = 1;
+        cage_control_lines();
+        if (!cage.dsp_held) c31_set_irq(0, 1);
+    }
+}
+
 void cage_reset(void) {
     int i;
     memset(cage.io, 0, sizeof(cage.io));
     cage.from_main = cage.control = cage.latch = 0;
     cage.cpu_to_cage = cage.cage_to_cpu = 0;
+    cage.pend_hd = cage.pend_tl = cage.vis_hd = cage.vis_tl = 0;
     cage.dma_enabled = cage.dma_timer_on = 0;
     cage.dma_end_cyc = 0;
     cage.dma_end_addr = 0;
@@ -238,13 +256,20 @@ uint32_t cage_drd(uint32_t addr) {
     }
     if (addr == 0xa00000) {
         uint32_t v = cage.from_main;
+        if (cage.vis_hd != cage.vis_tl) {
+            v = cage.vis[cage.vis_hd];
+            cage.vis_hd = (uint8_t)((cage.vis_hd + 1) & 63);
+            cage.from_main = (uint16_t)v;
+        }
         if (getenv("RR_LOG_SND"))
             fprintf(stderr, "snd dsp read %04X (dsp pc=%06X dt=%llu)\n",
                     v & 0xffffu, rrm->dsp->pc & 0xffffffu,
                     (unsigned long long)rrm->dsp->total);
-        cage.cpu_to_cage = 0;
-        cage_control_lines();
-        c31_set_irq(0, 0);
+        if (cage.vis_hd == cage.vis_tl) {
+            cage.cpu_to_cage = 0;
+            cage_control_lines();
+            c31_set_irq(0, 0);
+        }
         return v;
     }
     return 0;
@@ -340,14 +365,19 @@ uint16_t cage_main_r(void) {
 }
 
 void cage_main_w(uint16_t data) {
+    uint8_t ntl;
     if (getenv("RR_LOG_SND"))
         fprintf(stderr, "snd main->dsp %04X (68k pc=%06X dt=%llu)\n",
                 data, rrm->cpu->pc & 0xffffffu,
                 (unsigned long long)rrm->dsp->total);
-    cage.from_main = data;
-    cage.cpu_to_cage = 1;
-    cage_control_lines();
-    c31_set_irq(0, 1);
+    ntl = (uint8_t)((cage.pend_tl + 1) & 63);
+    if (ntl == cage.pend_hd) {
+        // Pending overflow: drop the oldest (should never happen; the
+        // 68K handshakes every command).
+        cage.pend_hd = (uint8_t)((cage.pend_hd + 1) & 63);
+    }
+    cage.pend[cage.pend_tl] = data;
+    cage.pend_tl = ntl;
 }
 
 uint16_t cage_control_r(void) {
@@ -372,6 +402,7 @@ void cage_control_w(uint16_t data) {
         memset(cage.io, 0, 0x60u * sizeof(uint32_t));
         cage.cpu_to_cage = 0;
         cage.cage_to_cpu = 0;
+        cage.pend_hd = cage.pend_tl = cage.vis_hd = cage.vis_tl = 0;
         cage.dsp_held = 1;
     } else {
         cage.dsp_held = 0;

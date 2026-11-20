@@ -50,12 +50,36 @@ int main(void) {
         c31_step(); // LDI AR0
         c31_step(); // LDF R1
         c31_step(); // CMPF R1,R0
-        // 0x027CA3D7 is about -0.1 and 0x07683333 about -23.8 in
-        // C31 float format, so R0 - R1 is positive: N clear, BGT taken.
-        T_OK((peek_st() & C31_ST_N) == 0, "cmpf greater clears N");
-        T_OK((peek_st() & C31_ST_Z) == 0, "cmpf greater clears Z");
-        T_OK(d_cond(d, 9), "BGT taken when greater");
-        T_OK(!d_cond(d, 7), "BLT not taken when greater");
+        // 0x027CA3D7 is about +3.9 and 0x07683333 about +104.2 in
+        // C31 float format, so R0 - R1 is negative: N set, BLT taken.
+        // (This vector once pinned a sign-extension bug in d_subf's
+        // exponent-alignment bias that cleared N here; MAME sets N.)
+        T_OK((peek_st() & C31_ST_N) != 0, "cmpf less sets N");
+        T_OK((peek_st() & C31_ST_Z) == 0, "cmpf less clears Z");
+        T_OK(!d_cond(d, 9), "BGT not taken when less");
+        T_OK(d_cond(d, 7), "BLT taken when less");
+    }
+    {
+        // Crash vector from the sound program's voice mix entry:
+        // CMPF R1=4.0, R4=10240.0 must set N (less) so the BGT at
+        // $203B skips the stale-RS loop; clearing N wedges the DSP.
+        c31_t *d = rrm->dsp;
+        poke(0x1000, 0x09010000u); // 4.0
+        poke(0x1001, 0x0F280000u); // 10240.0
+        d->pc = 0x1100;
+        d->dcount = -1;
+        d->st = 0;
+        d->ie = 0;
+        d->iff = 0;
+        d->irq = 0;
+        d->cycles = 1000000;
+        c31_step(); // LDI AR0
+        c31_step(); // LDF R0
+        c31_step(); // LDI AR0
+        c31_step(); // LDF R1
+        c31_step(); // CMPF R1,R0
+        T_OK((peek_st() & C31_ST_N) != 0, "mix-entry cmpf sets N");
+        T_OK(!d_cond(d, 9), "mix-entry BGT not taken");
     }
     printf("# %d tests, %d failures\n", t_count, t_failures);
     return t_failures != 0;

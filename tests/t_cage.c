@@ -111,13 +111,26 @@ int main(void) {
     }
 
     // Host mailbox and reset lines (both directions through 0xA00000).
+    // Delivery is deferred a scanline (MAME's synchronize parity): the
+    // DSP sees a command only after cage_scanline_swap publishes it.
     {
         cage_reset();
         cage_main_w(0xbeef);
-        T_OK(cage.cpu_to_cage, "main write raises cpu_to_cage");
+        T_OK(!cage.cpu_to_cage, "main write stays pending pre-swap");
+        T_OK(!(cage_control_r() & 2u), "control hides pending data");
+        T_EQ_U32(cage_drd(0xa00000u), 0u, "DSP reads empty pre-swap");
+        cage_scanline_swap();
+        T_OK(cage.cpu_to_cage, "swap raises cpu_to_cage");
         T_OK(cage_control_r() & 2u, "control shows data ready");
         T_EQ_U32(cage_drd(0xa00000u), 0xbeefu, "DSP reads mailbox");
         T_OK(!cage.cpu_to_cage, "DSP read drains mailbox");
+        // Bursts stay ordered and lossless across the swap.
+        cage_main_w(0x1111);
+        cage_main_w(0x2222);
+        cage_scanline_swap();
+        T_EQ_U32(cage_drd(0xa00000u), 0x1111u, "burst first kept");
+        T_EQ_U32(cage_drd(0xa00000u), 0x2222u, "burst second kept");
+        T_OK(!cage.cpu_to_cage, "burst drain clears flag");
         cage_dwr(0xa00000u, 0x5a5a);
         T_OK(cage.cage_to_cpu, "DSP write raises cage_to_cpu");
         T_OK(cage_control_r() & 1u, "control shows reply ready");

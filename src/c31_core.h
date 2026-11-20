@@ -546,8 +546,8 @@ static inline void d_addf(c31_t *d, c31reg_t *dst, const c31reg_t *s1,
         d_or_nzf(d, dst);
         return;
     }
-    m1 = (int64_t)s1->man ^ (int64_t)(int32_t)0x80000000u;
-    m2 = (int64_t)s2->man ^ (int64_t)(int32_t)0x80000000u;
+    m1 = (int64_t)s1->man ^ (int64_t)0x80000000u;
+    m2 = (int64_t)s2->man ^ (int64_t)0x80000000u;
     if (s1->exp > s2->exp) {
         exp = s1->exp;
         cnt = exp - s2->exp;
@@ -570,7 +570,7 @@ static inline void d_addf(c31_t *d, c31reg_t *dst, const c31reg_t *s1,
     man = m1 + m2;
     if (man == 0 || exp == -128) {
         exp = -128;
-        man = (int64_t)(int32_t)0x80000000u;
+        man = (int64_t)0x80000000u;
     } else if (man >= (int64_t)0x100000000ull ||
             man < (int64_t)0xffffffff00000000ull) {
         man >>= 1;
@@ -588,7 +588,7 @@ static inline void d_addf(c31_t *d, c31reg_t *dst, const c31reg_t *s1,
         }
     }
     if (exp <= -128) {
-        man = (int64_t)(int32_t)0x80000000u;
+        man = (int64_t)0x80000000u;
         exp = -128;
         d->st |= C31_ST_UF | C31_ST_LUF;
     } else if (exp > 127) {
@@ -596,7 +596,7 @@ static inline void d_addf(c31_t *d, c31reg_t *dst, const c31reg_t *s1,
         exp = 127;
         d->st |= C31_ST_V | C31_ST_LV;
     }
-    dst->man = (int32_t)(uint32_t)man ^ (int32_t)0x80000000u;
+    dst->man = (int32_t)((uint32_t)man ^ 0x80000000u);
     dst->exp = exp;
     d_or_nzf(d, dst);
 }
@@ -611,8 +611,8 @@ static inline void d_subf(c31_t *d, c31reg_t *dst, const c31reg_t *s1,
         d_or_nzf(d, dst);
         return;
     }
-    m1 = (int64_t)s1->man ^ (int64_t)(int32_t)0x80000000u;
-    m2 = (int64_t)s2->man ^ (int64_t)(int32_t)0x80000000u;
+    m1 = (int64_t)s1->man ^ (int64_t)0x80000000u;
+    m2 = (int64_t)s2->man ^ (int64_t)0x80000000u;
     if (s1->exp > s2->exp) {
         exp = s1->exp;
         cnt = exp - s2->exp;
@@ -634,7 +634,7 @@ static inline void d_subf(c31_t *d, c31reg_t *dst, const c31reg_t *s1,
     man = m1 - m2;
     if (man == 0 || exp == -128) {
         exp = -128;
-        man = (int64_t)(int32_t)0x80000000u;
+        man = (int64_t)0x80000000u;
     } else if (man >= (int64_t)0x100000000ull ||
             man < (int64_t)0xffffffff00000000ull) {
         man >>= 1;
@@ -654,14 +654,14 @@ static inline void d_subf(c31_t *d, c31reg_t *dst, const c31reg_t *s1,
     if (exp <= -128) {
         if (man != 0 || exp < -128)
             d->st |= C31_ST_UF | C31_ST_LUF;
-        man = (int64_t)(int32_t)0x80000000u;
+        man = (int64_t)0x80000000u;
         exp = -128;
     } else if (exp > 127) {
         man = (man < 0) ? 0 : (int64_t)0xffffffffu;
         exp = 127;
         d->st |= C31_ST_V | C31_ST_LV;
     }
-    dst->man = (int32_t)(uint32_t)man ^ (int32_t)0x80000000u;
+    dst->man = (int32_t)((uint32_t)man ^ 0x80000000u);
     dst->exp = exp;
     d_or_nzf(d, dst);
 }
@@ -685,7 +685,7 @@ static inline void d_mpyf(c31_t *d, c31reg_t *dst, const c31reg_t *s1,
     man >>= 46 - 31;
     if (man == 0) {
         exp = -128;
-        man = (int64_t)(int32_t)0x80000000u;
+        man = (int64_t)0x80000000u;
     } else if (man >= (int64_t)0x100000000ull) {
         man >>= 1;
         exp++;
@@ -698,7 +698,7 @@ static inline void d_mpyf(c31_t *d, c31reg_t *dst, const c31reg_t *s1,
         exp++;
     }
     if (exp <= -128) {
-        man = (int64_t)(int32_t)0x80000000u;
+        man = (int64_t)0x80000000u;
         exp = -128;
         d->st |= C31_ST_UF | C31_ST_LUF;
     } else if (exp > 127) {
@@ -706,7 +706,7 @@ static inline void d_mpyf(c31_t *d, c31reg_t *dst, const c31reg_t *s1,
         exp = 127;
         d->st |= C31_ST_V | C31_ST_LV;
     }
-    dst->man = (int32_t)(uint32_t)man ^ (int32_t)0x80000000u;
+    dst->man = (int32_t)((uint32_t)man ^ 0x80000000u);
     dst->exp = exp;
     d_or_nzf(d, dst);
 }

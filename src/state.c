@@ -51,7 +51,7 @@ static uint32_t get32(const uint8_t *src) {
 
 void machine_state_size(uint32_t *size) {
     *size = 16 + SP_CPU + SP_DSP + SP_RAM + SP_BANK + SP_CR + SP_DRAM +
-            SP_DIRAM + SP_DIO + 64 + SP_DAC + 32 + SP_EE + 4 + SP_XGA +
+            SP_DIRAM + SP_DIO + 580 + SP_DAC + 32 + SP_EE + 4 + SP_XGA +
             92 + gt_state_size();
 }
 
@@ -103,7 +103,15 @@ void machine_state_save(uint8_t *dst) {
     put32(p + 52, (uint32_t)cage_abs_cyc);
     put32(p + 56, (uint32_t)(cage_abs_cyc >> 32));
     put32(p + 60, (uint32_t)cage_slice_budget);
-    p += 64;
+    put32(p + 64, (uint32_t)cage.pend_hd | ((uint32_t)cage.pend_tl << 8) |
+            ((uint32_t)cage.vis_hd << 16) | ((uint32_t)cage.vis_tl << 24));
+    {
+        uint32_t fi;
+        for (fi = 0; fi < 64; fi++) put32(p + 68 + fi * 4, cage.pend[fi]);
+        for (fi = 0; fi < 64; fi++)
+            put32(p + 68 + 256 + fi * 4, cage.vis[fi]);
+    }
+    p += 580;
     {
         uint32_t ch;
         for (ch = 0; ch < CAGE_DAC_CHANNELS; ch++) {
@@ -224,8 +232,19 @@ int machine_state_load(const uint8_t *src, uint32_t size) {
     cage_abs_cyc = (int64_t)(((uint64_t)get32(p + 56) << 32) |
             get32(p + 52));
     cage_slice_budget = (int)get32(p + 60);
+    cage.pend_hd = (uint8_t)get32(p + 64);
+    cage.pend_tl = (uint8_t)(get32(p + 64) >> 8);
+    cage.vis_hd = (uint8_t)(get32(p + 64) >> 16);
+    cage.vis_tl = (uint8_t)(get32(p + 64) >> 24);
+    {
+        uint32_t fi;
+        for (fi = 0; fi < 64; fi++)
+            cage.pend[fi] = (uint16_t)get32(p + 68 + fi * 4);
+        for (fi = 0; fi < 64; fi++)
+            cage.vis[fi] = (uint16_t)get32(p + 68 + 256 + fi * 4);
+    }
     cage_retune();
-    p += 64;
+    p += 580;
     {
         uint32_t ch;
         for (ch = 0; ch < CAGE_DAC_CHANNELS; ch++) {

@@ -20,6 +20,13 @@ typedef struct {
     // Host communications.
     uint16_t from_main, control, latch;
     uint8_t cpu_to_cage, cage_to_cpu;
+    // Deferred 68K->DSP delivery (MAME's scheduler().synchronize parity:
+    // the DSP sees a command on the scanline after the 68K sent it, so
+    // the 68K-side handshake waits a beat instead of racing ahead).
+    uint16_t pend[64];
+    uint8_t pend_hd, pend_tl;
+    uint16_t vis[64];
+    uint8_t vis_hd, vis_tl;
     // DMA state.
     uint8_t dma_enabled, dma_timer_on;
     int64_t dma_end_cyc;
@@ -50,6 +57,9 @@ void cage_slice_begin(int budget);
 void cage_slice_end(void);
 // Board reset (power-on): clears regs, FIFOs and comm state.
 void cage_reset(void);
+// Move pending 68K->DSP commands to the DSP-visible queue. Called once
+// per scanline before either CPU runs.
+void cage_scanline_swap(void);
 // Slow DSP memory paths (wired into rr_hostfns_t).
 uint32_t cage_drd(uint32_t addr);
 void cage_dwr(uint32_t addr, uint32_t val);
