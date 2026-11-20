@@ -30,6 +30,11 @@
 #include "paths.h"
 #include "launch.h"
 #include "version.h"
+#include "controls.h"
+#include "m68k.h"
+#include "m68kdis.h"
+#include "net.h"
+#include "netplay.h"
 
 #ifdef RR_SDL
 #include <SDL2/SDL.h>
@@ -72,6 +77,14 @@ static void usage(void) {
            "  --save-at F FILE  save a state after frame F\n"
            "  --load FILE     start from a state file\n"
            "  --nvram FILE    use (and keep) this EEPROM image (default: blank)\n"
+           "  --shot-every N  save frame_NNNNN.ppm every N frames\n"
+           "  --rewind-test N every N frames rewind N, replay, check the state matches\n"
+           "  --runahead N    run N frames ahead and roll back after each frame\n"
+           "  --trace         log every 68K instruction (interpreter); --trace-from F\n"
+           "  --dis ADDR N    disassemble N 68K instructions at ADDR (hex)\n"
+           "  --net-host PORT / --net-join HOST:PORT  headless netplay test: play this\n"
+           "                  side of --script until --headless N, print the hash\n"
+           "  --net-delay N, --net-fps F, --net-sim LATENCY:JITTER:LOSS%%  (testing)\n"
            "  --emit-linked DIR  write the translated game code into DIR, for\n"
            "                  `make recomp` (game-derived: never share it)\n");
 }
@@ -274,6 +287,8 @@ typedef struct {
 static press_t script[1024];
 static int nscript;
 
+static int script_input(const char *name, int *player);
+
 static int parse_script(const char *s) {
     while (*s) {
         press_t *e;
@@ -284,6 +299,13 @@ static int parse_script(const char *s) {
         e = &script[nscript];
         e->hold = 6;
         if (sscanf(s, "%15s %d%n", e->name, &e->frame, &n) < 2) return -1;
+        {
+            int player;
+            if (!script_input(e->name, &player)) {
+                fprintf(stderr, "--script: unknown input %s\n", e->name);
+                return -1;
+            }
+        }
         s += n;
         if (*s == '+') {
             if (sscanf(s + 1, "%d%n", &e->hold, &n) < 1) return -1;
@@ -294,46 +316,43 @@ static int parse_script(const char *s) {
     return 0;
 }
 
-// The port bit for a player's control, by the set's layout. *byte gets
-// the port byte (active low) or *flag a held flag. 0 if unknown.
-static int input_bit(const char *name, uint8_t **byte, uint8_t **flag) {
-    static const char *const keys[] = { "start", "b1", "b2", "b3", "b4",
-        "right", "left", "down", "up" };
-    int k, p2;
-    *byte = *flag = NULL;
-    if (!strcmp(name, "coin1")) { *flag = &mach.in.coin1; return 1; }
-    if (!strcmp(name, "coin2")) { *flag = &mach.in.coin2; return 1; }
-    if (!strcmp(name, "service")) { *flag = &mach.in.service; return 1; }
-    if (!strcmp(name, "start1")) name = "p1start";
-    if (!strcmp(name, "start2")) name = "p2start";
+// A script input: its player (0/1) and BTN_* bit; the test switch is
+// player -1. 0 if the name is unknown.
+static int script_input(const char *name, int *player) {
+    static const char *const keys[] = { "b1", "b2", "b3", "b4", "up", "down",
+        "left", "right", "start" };
+    int k;
+    *player = 0;
+    if (!strcmp(name, "coin1")) return 1 << BTN_COIN;
+    if (!strcmp(name, "coin2")) { *player = 1; return 1 << BTN_COIN; }
+    if (!strcmp(name, "service") || !strcmp(name, "test")) { *player = -1; return 1; }
+    if (!strcmp(name, "start1")) return 1 << BTN_START;
+    if (!strcmp(name, "start2")) { *player = 1; return 1 << BTN_START; }
     if (name[0] != 'p' || (name[1] != '1' && name[1] != '2')) return 0;
-    p2 = name[1] == '2';
+    *player = name[1] - '1';
     for (k = 0; k < 9; k++)
-        if (!strcmp(name + 2, keys[k])) break;
-    if (k == 9) return 0;
-    *byte = p2 ? &mach.in.b1 : &mach.in.b3;
-    if (k >= 5) return 0x10 << (k - 5);                 // stick: bits 4-7
-    if (prof && prof->has_start_buttons) {
-        // Jan 1995: start, buttons 1-3 in the top bytes, button 4 below
-        if (k == 4) { *byte = &mach.in.b0; return p2 ? 0x08 : 0x02; }
-        return 1 << k;
+        if (!strcmp(name + 2, keys[k])) return 1 << (k < 4 ? BTN_B1 + k : k == 8 ? BTN_START : BTN_UP + k - 4);
+    return 0;
+}
+
+// The script's controls held during this frame.
+static void script_held(int frame, uint16_t held[2], int *test) {
+    int i;
+    held[0] = held[1] = 0;
+    *test = 0;
+    for (i = 0; i < nscript; i++) {
+        int player, bit = script_input(script[i].name, &player);
+        if (frame < script[i].frame || frame >= script[i].frame + script[i].hold) continue;
+        if (player < 0) *test = 1;
+        else held[player] |= (uint16_t)bit;
     }
-    // older sets: buttons 1-4 where the start bit was; start = button 1
-    return k == 0 ? 1 : 1 << (k - 1);
 }
 
 static void script_frame(int frame) {
-    int i;
-    mach.in.b0 = mach.in.b1 = mach.in.b3 = 0xff;
-    mach.in.coin1 = mach.in.coin2 = mach.in.service = 0;
-    for (i = 0; i < nscript; i++) {
-        uint8_t *byte, *flag;
-        int bit = input_bit(script[i].name, &byte, &flag);
-        if (frame < script[i].frame || frame >= script[i].frame + script[i].hold)
-            continue;
-        if (byte) *byte &= (uint8_t)~bit;
-        if (flag) *flag = 1;
-    }
+    uint16_t held[2];
+    int test;
+    script_held(frame, held, &test);
+    controls_apply(held, test);
 }
 
 // Translated code for a headless run: linked in, cached, or built now.
@@ -353,19 +372,77 @@ static void headless_game_code(void) {
         fprintf(stderr, "rec: %s\n", msg);
 }
 
-static int run_headless(int frames, const char *shot, const char *wav,
-        int want_hash, int save_at, const char *save_path) {
+// Headless options beyond the plain run (as UltraCombo's).
+typedef struct {
+    int frames, want_hash, save_at, shot_every, rewind_test, runahead, trace_from;
+    const char *shot, *wav, *save_path;
+} headless_t;
+
+// RR_POKE="F:ADDR:VALUE,...": write a byte at a 68K address (hex) before
+// frame F, headless only (testing).
+static void apply_pokes(int frame) {
+    const char *p = getenv("RR_POKE");
+    while (p && *p) {
+        int f, n = 0;
+        unsigned a, v;
+        if (sscanf(p, "%d:%x:%x%n", &f, &a, &v, &n) != 3) break;
+        if (f == frame) {
+            a &= 0xffffffu;
+            if (a >= 0xf80000u) mach.ram[a - 0xf80000u] = (uint8_t)v;
+            else if (a >= 0xd70000u && a < 0xd80000u) mach.bank[a - 0xd70000u] = (uint8_t)v;
+        }
+        p += n;
+        if (*p == ',') p++;
+    }
+}
+
+// RR_DUMP_AT=F: ram.bin / bank.bin (main RAM 0xF80000, work RAM 0xD70000)
+// after frame F; a list F1,F2,... writes ram_<F>.bin / bank_<F>.bin.
+static void dump_at(int frame) {
+    const char *l = getenv("RR_DUMP_AT"), *q;
+    int list;
+    if (!l) return;
+    list = strchr(l, ',') != NULL;
+    for (q = l; *q; q = strchr(q, ',') ? strchr(q, ',') + 1 : q + strlen(q)) {
+        char n0[32] = "ram.bin", n1[32] = "bank.bin";
+        FILE *o;
+        if (atoi(q) != frame) continue;
+        if (list) {
+            snprintf(n0, sizeof(n0), "ram_%05d.bin", frame);
+            snprintf(n1, sizeof(n1), "bank_%05d.bin", frame);
+        }
+        if ((o = fopen(n0, "wb"))) { fwrite(mach.ram, 1, RR_RAM_SIZE, o); fclose(o); }
+        if ((o = fopen(n1, "wb"))) { fwrite(mach.bank, 1, RR_BANK_SIZE, o); fclose(o); }
+    }
+}
+
+static int run_headless(const headless_t *o) {
     int16_t *pcm = NULL;
     uint32_t cap = 0, got_frames = 0;
-    int i;
+    int f, start = (int)mach.frames, rewind_fail = 0;
+    double acc_ms = 0, max_ms = 0;
+    const char *wav = o->wav ? o->wav : getenv("RR_WAV");
     if (wav) {
-        cap = (uint32_t)frames * 1200 + 4096;
+        cap = (uint32_t)o->frames * 1200 + 4096;
         pcm = (int16_t *)calloc((size_t)cap * 2, 2);
         if (!pcm) { fprintf(stderr, "out of memory\n"); return 1; }
     }
-    for (i = 0; i < frames; i++) {
-        if (nscript) script_frame(i);
+    state_init();
+    if (o->rewind_test || getenv("RR_HISTORY")) state_set_history((size_t)1 << 30);
+    // frames counted from power-on, so a loaded state continues its script
+    for (f = start + 1; f <= o->frames; f++) {
+        uint64_t t0 = rr_ticks_us();
+        double ms;
+        if (o->trace_from && f == o->trace_from) m68k_trace = 1;
+        if (nscript) script_frame(f - 1);
+        apply_pokes(f);
         machine_frame();
+        state_checkpoint();
+        if (o->runahead) {
+            int k;
+            for (k = 0; k < o->runahead; k++) machine_frame();
+            state_rollback();
+        }
         if (pcm) {
             static int16_t mL[4096], mR[4096];
             uint32_t n = cage_queued(), k, got;
@@ -378,20 +455,165 @@ static int run_headless(int frames, const char *shot, const char *wav,
             }
             got_frames += got;
         }
-        if (save_at && i + 1 == save_at) {
-            if (state_save_file(save_path)) fprintf(stderr, "saved %s after frame %d\n", save_path, save_at);
-            else fprintf(stderr, "%s: save failed\n", save_path);
+        if (o->save_at && f == o->save_at) {
+            if (state_save_file(o->save_path)) fprintf(stderr, "saved %s after frame %d\n", o->save_path, f);
+            else fprintf(stderr, "%s: save failed\n", o->save_path);
+        }
+        if (o->rewind_test && f % o->rewind_test == 0 && f > o->rewind_test) {
+            // go back N frames, replay them with the same input, compare
+            uint64_t want = state_hash();
+            int n = 0, k;
+            while (n < o->rewind_test && state_rewind()) n++;
+            for (k = f - n + 1; k <= f; k++) {
+                if (nscript) script_frame(k - 1);
+                apply_pokes(k);
+                machine_frame();
+                state_checkpoint();
+            }
+            {
+                uint64_t got = state_hash();
+                if (got != want) rewind_fail++;
+                fprintf(stderr, "rewind test frame %d: back %d, %s (%.1f MB history)\n", f, n,
+                        got == want ? "match" : "MISMATCH", state_history_bytes() / 1048576.0);
+            }
+        }
+        dump_at(f);
+        if (o->shot_every && f % o->shot_every == 0) {
+            char name[64];
+            snprintf(name, sizeof(name), "frame_%05d.ppm", f);
+            write_ppm(name);
+        }
+        ms = (rr_ticks_us() - t0) / 1000.0;
+        acc_ms += ms;
+        if (ms > max_ms) max_ms = ms;
+        if (f % 60 == 0) {
+            if (getenv("RR_SPEED"))
+                fprintf(stderr, "frames %d-%d: %.2f ms/frame (%.0f%% speed) worst %.2f ms\n", f - 59, f,
+                        acc_ms / 60, 100.0 * (1000.0 * GT_FPS_DEN / GT_FPS_NUM) / (acc_ms / 60), max_ms);
+            acc_ms = max_ms = 0;
         }
     }
     if (pcm) {
         write_wav(wav, pcm, got_frames, cage.dac_rate);
         free(pcm);
     }
-    printf("ran %d frames (68K pc=%06X, DSP pc=%06X)\n", frames,
+    printf("ran %d frames (68K pc=%06X, DSP pc=%06X)\n", o->frames - start,
             rrm->cpu->pc & 0xffffffu, rrm->dsp->pc & 0xffffffu);
-    if (shot) write_ppm(shot);
-    if (want_hash) printf("state hash %016llx\n", (unsigned long long)state_hash());
+    if (o->shot) write_ppm(o->shot);
+    if (o->want_hash) printf("state hash %016llx\n", (unsigned long long)state_hash());
+    if (rewind_fail) {
+        fprintf(stderr, "%d rewind mismatches\n", rewind_fail);
+        return 3;
+    }
     return 0;
+}
+
+/* ---------------------------------------------------------------- */
+/* Netplay                                                          */
+/* ---------------------------------------------------------------- */
+
+void machine_run_inputs(const uint16_t in[2], bool resim) {
+    static int desync_at = -1;      // testing: RR_DESYNC_AT=frame breaks this side
+    controls_apply(in, 0);
+    machine_frame();
+    if (desync_at < 0) desync_at = getenv("RR_DESYNC_AT") ? atoi(getenv("RR_DESYNC_AT")) : 0;
+    if (desync_at && mach.frames == (uint64_t)desync_at && !resim) mach.ram[0x1000] ^= 0x55;
+    state_checkpoint();
+    if (resim) {                    // its sound was already heard
+        static int16_t l[4096], r[4096];
+        while (cage_mix(l, r, 4096) > 0) {}
+    }
+}
+
+void machine_netplay_reset(void) {
+    uint16_t none[2] = { 0, 0 };
+    int i;
+    machine_reset();
+    for (i = 0; i < NP_BOOT_FRAMES; i++) {
+        controls_apply(none, 0);
+        machine_frame();
+    }
+    state_init();
+}
+
+int net_warmup;     // testing: play locally (with rewind history) until the session starts
+
+// --net-host PORT / --net-join HOST[:PORT]: play this side of --script
+// until frame `end` over the network, then print the state hash.
+static int headless_netplay(int end, const char *host_port, const char *join, int delay,
+        int fps, int lat, int jit, int loss) {
+    int me = host_port ? 0 : 1, ok;
+    double next = net_now_ms();
+    uint32_t last_report = 0;
+    netplay_set_callbacks(machine_run_inputs, machine_netplay_reset);
+    net_simulate(lat, jit, loss);
+    if (host_port) ok = netplay_host(atoi(host_port), delay);
+    else {
+        char h[256];
+        int port = NP_DEFAULT_PORT;
+        char *c;
+        snprintf(h, sizeof(h), "%s", join);
+        c = strrchr(h, ':');
+        if (c) { *c = 0; port = atoi(c + 1); }
+        ok = netplay_join(h, port, delay);
+    }
+    if (!ok) { fprintf(stderr, "%s\n", netplay_take_error()); return 1; }
+    netplay_set_end((uint32_t)end);
+    state_init();
+    if (net_warmup) state_set_history((size_t)256 << 20);
+    for (;;) {
+        uint16_t held[2], local;
+        int test;
+        const char *err;
+        double now;
+        if (net_warmup && !netplay_running()) {
+            uint16_t none[2] = { 0, 0 };
+            controls_apply(none, 0);
+            machine_frame();
+            state_checkpoint();
+        }
+        // this side's buttons from the script, for the frame the input will be used in
+        script_held((int)netplay_input_frame(), held, &test);
+        local = held[me];
+        netplay_update(local);
+        err = netplay_take_error();
+        if (err) { fprintf(stderr, "%s\n", err); return 2; }
+        if (netplay_running() && netplay_confirmed() >= (uint32_t)end) {
+            int i;
+            printf("state hash %016llx at frame %llu\n", (unsigned long long)state_hash(),
+                    (unsigned long long)mach.frames);
+            for (i = 0; i < 30; i++) { netplay_update(0); rr_sleep_ms(10); }  // let the other side confirm too
+            netplay_stop();
+            return 0;
+        }
+        if (netplay_running() && mach.frames / 600 != last_report) {
+            last_report = (uint32_t)(mach.frames / 600);
+            fprintf(stderr, "%s\n", netplay_status());
+        }
+        next += 1000.0 / fps;
+        now = net_now_ms();
+        if (next > now) rr_sleep_ms((int)(next - now));
+        else if (now - next > 100) next = now;
+    }
+}
+
+// --dis ADDR N: disassemble N 68K instructions of the program ROM.
+static void disassemble(uint32_t a, int n) {
+    while (n-- > 0 && a + 2 <= RR_ROM_SIZE) {
+        uint16_t w[12];
+        m_insn_t in;
+        char buf[128];
+        int i, len;
+        for (i = 0; i < 11; i++)
+            w[i] = a + 2 * i + 1 < RR_ROM_SIZE ?
+                    (uint16_t)(mach.rom[a + 2 * i] << 8 | mach.rom[a + 2 * i + 1]) : 0;
+        len = m68k_decode(a, w, 11, &in);
+        if (len <= 0) len = 1;
+        printf("%06x:", a);
+        for (i = 0; i < 5; i++) printf(i < len ? " %04x" : "     ", w[i]);
+        printf("  %s\n", m68k_format(buf, &in, a));
+        a += (uint32_t)len * 2;
+    }
 }
 
 /* ---------------------------------------------------------------- */
@@ -438,11 +660,12 @@ void app_restart(void) {
 static int option_values(const char *a) {
     static const char *const one[] = { "--roms", "--game-version", "--data-dir", "--set",
         "--headless", "--frames", "--script", "--shot", "--wav", "--load", "--nvram",
-        "--emit-linked", NULL };
+        "--emit-linked", "--shot-every", "--rewind-test", "--runahead", "--trace-from",
+        "--net-host", "--net-join", "--net-delay", "--net-fps", "--net-sim", "--host", "--join", NULL };
     int i;
     for (i = 0; one[i]; i++)
         if (!strcmp(a, one[i])) return 1;
-    if (!strcmp(a, "--save-at")) return 2;
+    if (!strcmp(a, "--save-at") || !strcmp(a, "--dis")) return 2;
     return 0;
 }
 
@@ -451,6 +674,10 @@ int main(int argc, char **argv) {
     const char *shot = NULL, *wav = NULL, *load_path = NULL, *save_path = NULL;
     const char *nvram_given = NULL, *emit_dir = NULL;
     int frames = -1, want_hash = 0, save_at = 0, i;
+    int shot_every = 0, rewind_test = 0, runahead = 0, trace_from = 0, dis_count = 0;
+    const char *net_host = NULL, *net_join = NULL;
+    int net_delay = 2, net_fps = 60, net_lat = 0, net_jit = 0, net_loss = 0;
+    uint32_t dis_addr = 0;
 #ifdef RR_SDL
     static char ini[4400];
 #endif
@@ -476,7 +703,7 @@ int main(int argc, char **argv) {
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--data-dir") && i + 1 < argc) set_data_dir(argv[i + 1]);
         if ((!strcmp(argv[i], "--headless") || !strcmp(argv[i], "--frames") ||
-                !strcmp(argv[i], "--emit-linked")) && i + 1 < argc)
+                !strcmp(argv[i], "--emit-linked") || !strcmp(argv[i], "--dis")) && i + 1 < argc)
             headless_mode = 1;
         if (argv[i][0] != '-' && !launch_path) launch_path = argv[i];
         i += option_values(argv[i]);
@@ -538,6 +765,22 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--load") && i + 1 < argc) load_path = argv[++i];
         else if (!strcmp(argv[i], "--nvram") && i + 1 < argc) nvram_given = argv[++i];
         else if (!strcmp(argv[i], "--emit-linked") && i + 1 < argc) emit_dir = argv[++i];
+        else if (!strcmp(argv[i], "--shot-every") && i + 1 < argc) shot_every = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--rewind-test") && i + 1 < argc) rewind_test = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--runahead") && i + 1 < argc) runahead = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--trace")) m68k_trace = 1;
+        else if (!strcmp(argv[i], "--net-host") && i + 1 < argc) net_host = argv[++i];
+        else if (!strcmp(argv[i], "--net-join") && i + 1 < argc) net_join = argv[++i];
+        else if (!strcmp(argv[i], "--net-delay") && i + 1 < argc) net_delay = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--net-fps") && i + 1 < argc) net_fps = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--net-warmup")) net_warmup = 1;
+        else if (!strcmp(argv[i], "--net-sim") && i + 1 < argc)
+            sscanf(argv[++i], "%d:%d:%d", &net_lat, &net_jit, &net_loss);
+        else if (!strcmp(argv[i], "--trace-from") && i + 1 < argc) trace_from = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--dis") && i + 2 < argc) {
+            dis_addr = (uint32_t)strtoul(argv[++i], NULL, 16);
+            dis_count = atoi(argv[++i]);
+        }
         else if (!strcmp(argv[i], "--save-at") && i + 2 < argc) {
             save_at = atoi(argv[++i]);
             save_path = argv[++i];
@@ -609,6 +852,10 @@ int main(int argc, char **argv) {
     nvram_load();
     rec_init();
     machine_reset();
+    if (dis_count) {
+        disassemble(dis_addr, dis_count);
+        return 0;
+    }
     if (emit_dir) {
         int rc = rec_emit_linked(emit_dir);
         fprintf(stderr, "%s %s\n", rc ? "could not write" : "wrote", emit_dir);
@@ -625,7 +872,34 @@ int main(int argc, char **argv) {
             fprintf(stderr, "%s: cannot load state\n", load_path);
             return 1;
         }
-        rc = run_headless(frames, shot, wav, want_hash, save_at, save_path);
+        if (net_host || net_join)
+            return headless_netplay(frames, net_host, net_join, net_delay, net_fps,
+                    net_lat, net_jit, net_loss);
+        if (getenv("RR_RESET_TEST")) {
+            // testing: does anything survive a power-on reset? Run N frames,
+            // power-cycle, and print the hash (equal to a fresh power-on's)
+            int n = atoi(getenv("RR_RESET_TEST"));
+            for (i = 0; i < n; i++) machine_frame();
+            machine_reset();
+            fprintf(stderr, "after reset: hash %016llx quick %016llx\n",
+                    (unsigned long long)state_hash(), (unsigned long long)state_quick_hash());
+            return 0;
+        }
+        {
+            headless_t o;
+            memset(&o, 0, sizeof(o));
+            o.frames = frames;
+            o.want_hash = want_hash;
+            o.save_at = save_at;
+            o.save_path = save_path;
+            o.shot = shot;
+            o.wav = wav;
+            o.shot_every = shot_every;
+            o.rewind_test = rewind_test;
+            o.runahead = runahead;
+            o.trace_from = trace_from;
+            rc = run_headless(&o);
+        }
         if (nvram_given) app_nvram_save();
         rec_shutdown();
         return rc;

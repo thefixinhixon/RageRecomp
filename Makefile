@@ -27,7 +27,7 @@ CORE_SRCS = \
     src/rec.c src/rec_build.c src/rec_none.c src/roms.c src/game.c \
     src/eeprom.c src/xga.c src/gtvid.c src/state.c \
     src/m68kdis.c src/c31dis.c src/m68krec.c src/c31rec.c \
-    src/paths.c src/launch.c \
+    src/paths.c src/launch.c src/controls.c src/net.c src/netplay.c \
     src/third_party/miniz/miniz.c \
     src/third_party/miniz/miniz_tdef.c \
     src/third_party/miniz/miniz_tinfl.c \
@@ -137,7 +137,7 @@ $(OUTDIR)/rec/%.o: build/rec/%.c
 WIN_SDL ?= $(wildcard deps/sdl2-mingw/SDL2-*/x86_64-w64-mingw32)
 windows:
 	$(MAKE) OUTDIR=build-win CC=x86_64-w64-mingw32-gcc EXE=.exe \
-	    SYSLIBS="-lm" HAVE_SDL=$(if $(WIN_SDL),yes,) \
+	    SYSLIBS="-lm -lws2_32" HAVE_SDL=$(if $(WIN_SDL),yes,) \
 	    SDL_CFLAGS="-I$(WIN_SDL)/include -I$(WIN_SDL)/include/SDL2 -Dmain=SDL_main" \
 	    SDL_LIBS="-L$(WIN_SDL)/lib -lmingw32 -lSDL2main -lSDL2 -mwindows -static-libgcc" \
 	    build-win/ragerecomp-headless.exe $(if $(WIN_SDL),build-win/ragerecomp.exe) \

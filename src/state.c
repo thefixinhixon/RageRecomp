@@ -10,9 +10,10 @@
 
 #define STATE_MAGIC 0x31525252u // "RRR1"
 
+// Translated and interpreted code emulate identically, so only the state
+// format (bumped with any emulation change) identifies compatible builds.
 uint32_t state_compat_id(void) {
-    return ((uint32_t)REC_ABI_VERSION << 24) |
-            ((uint32_t)RECOMP_VERSION << 16) | STATE_FORMAT;
+    return 0x52520000u | STATE_FORMAT;
 }
 
 static uint32_t crc32_buf(const uint8_t *data, uint32_t len) {
@@ -23,6 +24,18 @@ static uint32_t crc32_buf(const uint8_t *data, uint32_t len) {
             crc = (crc & 1) ? (crc >> 1) ^ 0xedb88320u : crc >> 1;
     }
     return crc ^ 0xffffffffu;
+}
+
+// The program ROM's CRC, computed once (states record which ROM they're from).
+static uint32_t rom_crc(void) {
+    static uint32_t crc;
+    static const uint8_t *of;
+    if (!mach.rom) return 0;
+    if (of != mach.rom) {
+        crc = crc32_buf(mach.rom, 0x200000u);
+        of = mach.rom;
+    }
+    return crc;
 }
 
 static void put32(uint8_t *dst, uint32_t v) {
@@ -46,14 +59,13 @@ static uint32_t get32(const uint8_t *src) {
 #define SP_DRAM (RR_DSP_RAM_WORDS * 4)
 #define SP_DIRAM (0x800u * 4)
 #define SP_DIO (0x100u * 4)
-#define SP_DAC (CAGE_DAC_CHANNELS * CAGE_DAC_FIFO * 2)
 #define SP_EE 2048u
 #define SP_XGA sizeof(xga_t)
 
 void machine_state_size(uint32_t *size) {
     *size = 16 + SP_CPU + SP_DSP + SP_RAM + SP_BANK + SP_CR + SP_DRAM +
-            SP_DIRAM + SP_DIO + 580 + SP_DAC + 32 + SP_EE + 4 + SP_XGA +
-            96 + gt_state_size();
+            SP_DIRAM + SP_DIO + 580 + SP_EE + 4 + SP_XGA +
+            104 + gt_state_size();
 }
 
 void machine_state_save(uint8_t *dst) {
@@ -65,7 +77,7 @@ void machine_state_save(uint8_t *dst) {
         machine_state_size(&size);
         put32(p + 8, size);
     }
-    put32(p + 12, mach.rom ? crc32_buf(mach.rom, 0x200000u) : 0);
+    put32(p + 12, rom_crc());
     p += 16;
     memcpy(p, &mach.cpu, SP_CPU);
     p += SP_CPU;
@@ -113,18 +125,9 @@ void machine_state_save(uint8_t *dst) {
             put32(p + 68 + 256 + fi * 4, cage.vis[fi]);
     }
     p += 580;
-    {
-        uint32_t ch;
-        for (ch = 0; ch < CAGE_DAC_CHANNELS; ch++) {
-            memcpy(p, cage.dac[ch], CAGE_DAC_FIFO * 2);
-            p += CAGE_DAC_FIFO * 2;
-        }
-        for (ch = 0; ch < CAGE_DAC_CHANNELS; ch++) {
-            put32(p, cage.dac_wr[ch]);
-            put32(p + 4, cage.dac_rd[ch]);
-            p += 8;
-        }
-    }
+    // The DAC FIFOs are the sound on its way to the host, not emulated
+    // state (nothing reads them back): left out, so two machines that
+    // played their sound at different moments still compare equal.
     memcpy(p, eeprom.data, SP_EE);
     p += SP_EE;
     put32(p, eeprom.unlocked);
@@ -156,7 +159,9 @@ void machine_state_save(uint8_t *dst) {
     put32(p + 40, mach.in.coin2);
     put32(p + 44, mach.in.tilt);
     put32(p + 48, mach.in.b0);
-    p += 52;
+    put32(p + 52, (uint32_t)mach.frames);
+    put32(p + 56, (uint32_t)(mach.frames >> 32));
+    p += 60;
     gt_state_save(p);
 }
 
@@ -173,7 +178,7 @@ int machine_state_load(const uint8_t *src, uint32_t size) {
     if (get32(p) != STATE_MAGIC) return -1;
     if (get32(p + 4) != state_compat_id()) return -1;
     if (get32(p + 8) != want) return -1;
-    if (!mach.rom || get32(p + 12) != crc32_buf(mach.rom, 0x200000u))
+    if (!mach.rom || get32(p + 12) != rom_crc())
         return -1;
     p += 16;
     memcpy(&mach.cpu, p, SP_CPU);
@@ -226,18 +231,6 @@ int machine_state_load(const uint8_t *src, uint32_t size) {
     }
     cage_retune();
     p += 580;
-    {
-        uint32_t ch;
-        for (ch = 0; ch < CAGE_DAC_CHANNELS; ch++) {
-            memcpy(cage.dac[ch], p, CAGE_DAC_FIFO * 2);
-            p += CAGE_DAC_FIFO * 2;
-        }
-        for (ch = 0; ch < CAGE_DAC_CHANNELS; ch++) {
-            cage.dac_wr[ch] = get32(p);
-            cage.dac_rd[ch] = get32(p + 4);
-            p += 8;
-        }
-    }
     memcpy(eeprom.data, p, SP_EE);
     p += SP_EE;
     eeprom.unlocked = (uint8_t)get32(p);
@@ -267,7 +260,8 @@ int machine_state_load(const uint8_t *src, uint32_t size) {
     mach.in.coin2 = (uint8_t)get32(p + 40);
     mach.in.tilt = (uint8_t)get32(p + 44);
     mach.in.b0 = (uint8_t)get32(p + 48);
-    p += 52;
+    mach.frames = (uint64_t)get32(p + 52) | ((uint64_t)get32(p + 56) << 32);
+    p += 60;
     gt_state_load(p);
     // Derived state: re-derive the DSP float word rate (done above),
     // refresh the IRQ lines, and re-validate translated DSP chunks.
@@ -324,5 +318,200 @@ uint64_t state_hash(void) {
         h *= 1099511628211ull;
     }
     free(blob);
+    return h;
+}
+
+// ------------------------------------------------------------- history
+//
+// Rewind, run-ahead and netplay rollback, as UltraCombo does them, but on
+// the serialized state: every checkpoint serializes the machine, and the
+// 4 KB pages of it that changed since the last one go into the history,
+// XOR-packed against the newer copy. (The page tables give translated code
+// direct writes, so there are no write hooks to mark pages dirty; comparing
+// the ~1.4 MB serialized state is cheaper than any.)
+
+#define PAGE 4096
+
+static uint8_t *mirror;         // the state at the last checkpoint
+static uint8_t *cur;            // scratch: the state now
+static uint32_t blob_size, npages;
+
+// Tokens of (u16 equal words, u16 literal words, literal words...): XOR of
+// a against b, zero runs skipped. At most PAGE + 8 bytes.
+static size_t pack_xor(uint8_t *out, const uint8_t *a, const uint8_t *b) {
+    const uint8_t *x = a, *y = b;
+    uint8_t *o = out;
+    int i = 0, n = PAGE / 4;
+    while (i < n) {
+        int z = i, l, k;
+        uint16_t zc, lc;
+        while (i < n && !memcmp(x + 4 * i, y + 4 * i, 4)) i++;
+        l = i;
+        // a literal run ends at 3+ equal words in a row (cheaper as a zero run)
+        while (i < n && !(!memcmp(x + 4 * i, y + 4 * i, 4) &&
+                (i + 1 >= n || !memcmp(x + 4 * i + 4, y + 4 * i + 4, 4)) &&
+                (i + 2 >= n || !memcmp(x + 4 * i + 8, y + 4 * i + 8, 4))))
+            i++;
+        zc = (uint16_t)(l - z);
+        lc = (uint16_t)(i - l);
+        memcpy(o, &zc, 2);
+        memcpy(o + 2, &lc, 2);
+        o += 4;
+        for (k = l; k < i; k++) {
+            int j;
+            for (j = 0; j < 4; j++) *o++ = x[4 * k + j] ^ y[4 * k + j];
+        }
+    }
+    return (size_t)(o - out);
+}
+
+// dst ^= unpacked data. Returns bytes consumed.
+static size_t unpack_xor(uint8_t *dst, const uint8_t *in) {
+    const uint8_t *p = in;
+    int i = 0, n = PAGE / 4;
+    while (i < n) {
+        uint16_t zc, lc;
+        int k, j;
+        memcpy(&zc, p, 2);
+        memcpy(&lc, p + 2, 2);
+        p += 4;
+        i += zc;
+        for (k = 0; k < lc && i < n; k++, i++)
+            for (j = 0; j < 4; j++) dst[4 * i + j] ^= *p++;
+    }
+    return (size_t)(p - in);
+}
+
+// Entry k takes the state from checkpoint k+1 back to checkpoint k: the
+// pages that changed in between, each XOR its newer value.
+typedef struct {
+    size_t size;
+    uint32_t npages;
+    // followed by npages x (u32 page, packed xor)
+} entry_t;
+
+#define MAX_ENTRIES 16384
+static entry_t *hist[MAX_ENTRIES];
+static int hist_head, hist_count;
+static size_t hist_bytes, hist_budget;
+static uint8_t *scratch;
+
+static void hist_drop_oldest(void) {
+    int i = (hist_head - hist_count + MAX_ENTRIES) % MAX_ENTRIES;
+    hist_bytes -= hist[i]->size;
+    free(hist[i]);
+    hist[i] = NULL;
+    hist_count--;
+}
+
+void state_set_history(size_t bytes) {
+    hist_budget = bytes;
+    while (hist_count && (hist_bytes > hist_budget || !bytes)) hist_drop_oldest();
+}
+
+double state_history_seconds(void) {
+    return hist_count * (double)GT_FPS_DEN / GT_FPS_NUM;
+}
+
+size_t state_history_bytes(void) { return hist_bytes; }
+
+static void restore(const uint8_t *src) {
+    uint32_t size;
+    machine_state_size(&size);
+    machine_state_load(src, size);
+}
+
+void state_init(void) {
+    uint32_t size;
+    machine_state_size(&size);
+    if (!mirror || blob_size != ((size + PAGE - 1) / PAGE) * PAGE) {
+        free(mirror);
+        free(cur);
+        free(scratch);
+        blob_size = ((size + PAGE - 1) / PAGE) * PAGE;
+        npages = blob_size / PAGE;
+        mirror = (uint8_t *)calloc(blob_size, 1);
+        cur = (uint8_t *)calloc(blob_size, 1);
+        scratch = (uint8_t *)malloc(sizeof(entry_t) + (size_t)npages * (PAGE + 16));
+    }
+    machine_state_save(mirror);
+    while (hist_count) hist_drop_oldest();
+}
+
+void state_checkpoint(void) {
+    uint32_t g;
+    entry_t *e = NULL;
+    uint8_t *p = NULL;
+    if (!mirror) state_init();
+    machine_state_save(cur);
+    if (hist_budget) {
+        e = (entry_t *)scratch;
+        e->npages = 0;
+        p = scratch + sizeof(*e);
+    }
+    for (g = 0; g < npages; g++) {
+        uint8_t *c = cur + (size_t)g * PAGE, *m = mirror + (size_t)g * PAGE;
+        if (!memcmp(c, m, PAGE)) continue;
+        if (e) {
+            memcpy(p, &g, 4);
+            p += 4;
+            p += pack_xor(p, c, m);
+            e->npages++;
+        }
+        memcpy(m, c, PAGE);
+    }
+    if (!e) return;
+    e->size = (size_t)(p - scratch);
+    {
+        entry_t *copy = (entry_t *)malloc(e->size);
+        if (!copy) return;
+        memcpy(copy, scratch, e->size);
+        if (hist_count == MAX_ENTRIES) hist_drop_oldest();
+        hist[hist_head] = copy;
+        hist_head = (hist_head + 1) % MAX_ENTRIES;
+        hist_count++;
+        hist_bytes += copy->size;
+        while (hist_bytes > hist_budget && hist_count > 1) hist_drop_oldest();
+    }
+}
+
+void state_rollback(void) {
+    if (!mirror) return;
+    restore(mirror);
+}
+
+int state_rewind(void) {
+    entry_t *e;
+    const uint8_t *p;
+    uint32_t i;
+    if (!hist_count) return 0;
+    hist_head = (hist_head - 1 + MAX_ENTRIES) % MAX_ENTRIES;
+    e = hist[hist_head];
+    hist[hist_head] = NULL;
+    hist_count--;
+    hist_bytes -= e->size;
+    p = (const uint8_t *)(e + 1);
+    for (i = 0; i < e->npages; i++) {
+        uint32_t g;
+        memcpy(&g, p, 4);
+        p += 4;
+        p += unpack_xor(mirror + (size_t)g * PAGE, p);  // mirror now holds the older page
+    }
+    free(e);
+    restore(mirror);
+    return 1;
+}
+
+// Netplay's per-second check: a fast hash (64-bit words) of the whole state.
+uint64_t state_quick_hash(void) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    uint32_t i;
+    if (!cur) state_init();
+    machine_state_save(cur);
+    for (i = 0; i + 8 <= blob_size; i += 8) {
+        uint64_t w;
+        memcpy(&w, cur + i, 8);
+        h = (h ^ w) * 0x100000001b3ull;
+    }
     return h;
 }

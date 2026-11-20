@@ -67,6 +67,7 @@ typedef struct {
     uint64_t carry68k, carrydsp;
     int32_t irq6_cyc;
     uint8_t playfield_tile_bank;
+    uint64_t frames;    // frames run since power-on
     // Frame output (indexed colour + final RGBA set by gtvid).
     uint16_t *frame_ind; // 336*240 playfield/object/alpha composite indices
     uint32_t *frame_rgb; // 336*240 final XRGB pixels

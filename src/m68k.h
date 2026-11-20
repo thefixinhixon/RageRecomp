@@ -20,6 +20,9 @@ int m68k_run(void);
 // Execute one instruction. Returns 0 normally, 1 if stopped, 2 if halted.
 // Used by the translated-code dispatcher for untranslated regions.
 int m68k_step(void);
+// --trace: log every instruction the interpreter runs (translated code is
+// not used while it is set).
+extern int m68k_trace;
 
 // Take a pending interrupt/exception outside the run loop (used by the
 // translated-code dispatcher). Returns nonzero if one was taken.

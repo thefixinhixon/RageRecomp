@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "m68kdis.h"
+#include "machine.h"
 
 void m68k_reset(void) {
     m68k_t *c = rrm->cpu;
@@ -38,6 +40,15 @@ int m68k_service(void) {
             fprintf(stderr, "exc vec=%u pc=%06X ea=%06X ssw=%04X sp=%06X\n",
                     vec, fault & 0xffffffu, c->exc_ea & 0xffffffu,
                     c->exc_ssw, c->a[7] & 0xffffffu);
+        if ((vec == 2 || vec == 3) && getenv("RR_DUMP_ON_EXC")) {
+            // bus or address error: RAM and registers for a post-mortem
+            FILE *o = fopen("ram.bin", "wb");
+            if (o) { fwrite(mach.ram, 1, RR_RAM_SIZE, o); fclose(o); }
+            fprintf(stderr, "exception %u at %06X: d0-7 %08X %08X %08X %08X %08X %08X %08X %08X\n"
+                    "a0-7 %08X %08X %08X %08X %08X %08X %08X %08X\n", vec, fault & 0xffffffu,
+                    c->d[0], c->d[1], c->d[2], c->d[3], c->d[4], c->d[5], c->d[6], c->d[7],
+                    c->a[0], c->a[1], c->a[2], c->a[3], c->a[4], c->a[5], c->a[6], c->a[7]);
+        }
         rr_take_exc(c, fault);
         if (c->exc) { c->halted = 1; return 0; } // fault during entry
         return 1;
@@ -53,6 +64,18 @@ int m68k_service(void) {
         }
     }
     return 0;
+}
+
+int m68k_trace;
+
+// RR_COVER=file: one bit per executed program-ROM word (interpreter only),
+// written at exit.
+static uint8_t *cover;
+static void cover_save(void) {
+    FILE *f = fopen(getenv("RR_COVER"), "wb");
+    if (!f) return;
+    fwrite(cover, 1, 0x200000u / 16, f);
+    fclose(f);
 }
 
 // Execute one instruction (service + fetch + decode + run + trace).
@@ -115,6 +138,19 @@ int m68k_step(void) {
                     c->a[3], c->a[4], c->a[5], c->a[6],
                     c->a[7] & 0xffffffu, rr_mrd32(c->a[7] & 0xffffffu, pc), c->sr);
         }
+    }
+    if (m68k_trace) {
+        char buf[128];
+        fprintf(stderr, "%06X  %-40s d0=%08X d1=%08X a0=%08X a7=%08X sr=%04X\n", pc,
+                m68k_format(buf, &in, pc), c->d[0], c->d[1], c->a[0], c->a[7], c->sr);
+    }
+    {
+        static int cover_on = -1;
+        if (cover_on < 0) {
+            cover_on = getenv("RR_COVER") != NULL;
+            if (cover_on && (cover = (uint8_t *)calloc(1, 0x200000u / 16))) atexit(cover_save);
+        }
+        if (cover && pc < 0x200000u) cover[pc >> 4] |= (uint8_t)(1u << ((pc >> 1) & 7));
     }
     rr_exec(c, &in, pc);
 #ifdef RR_CORE_WATCH

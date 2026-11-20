@@ -2,13 +2,7 @@
 #pragma once
 #include <SDL2/SDL.h>
 #include <stdbool.h>
-
-// Cabinet controls per player.
-enum {
-    BTN_B1, BTN_B2, BTN_B3, BTN_B4,
-    BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_START, BTN_COIN,
-    NBUTTONS
-};
+#include "controls.h"
 
 enum { HK_MENU, HK_PAUSE, HK_STEP, HK_FAST, HK_SAVE_STATE, HK_LOAD_STATE, HK_NEXT_SLOT,
        HK_FULLSCREEN, HK_SCREENSHOT, HK_VOL_UP, HK_VOL_DOWN, HK_MUTE, HK_TEST,

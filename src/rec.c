@@ -64,8 +64,8 @@ void rec_init(void) {
         hist68 = (uint32_t *)calloc(HIST_68K, sizeof(*hist68));
         histdsp = (uint32_t *)calloc(HIST_DSP, sizeof(*histdsp));
     }
-    force_interp_m68k = getenv("RR_NOREC") && getenv("RR_NOREC")[0] != 0 &&
-            strcmp(getenv("RR_NOREC"), "0") != 0;
+    force_interp_m68k = (getenv("RR_NOREC") && getenv("RR_NOREC")[0] != 0 &&
+            strcmp(getenv("RR_NOREC"), "0") != 0) || getenv("RR_COVER");
     force_interp_dsp = getenv("RR_NODSP") && getenv("RR_NODSP")[0] != 0 &&
             strcmp(getenv("RR_NODSP"), "0") != 0;
     if (!force_interp_m68k && rec_linked_m68k.nlabels > 0 &&
@@ -107,7 +107,7 @@ int rec_use_dsp(const rec_module_t *mod) {
 }
 
 int rec_have_m68k(void) {
-    return !force_interp_m68k && mod_m68k && mod_m68k->nlabels > 0;
+    return !force_interp_m68k && !m68k_trace && mod_m68k && mod_m68k->nlabels > 0;
 }
 
 int rec_have_dsp(void) {

@@ -165,10 +165,13 @@ state hash:
     tools/regress.sh PROGRAM SET [RUN_DIR] [WORK_DIR]
 
 The hash is the same for translated and interpreted runs, for every
-compiler and for linked-in code; current value (primrage, RECOMP_VERSION
-8, STATE_FORMAT 3): `923d56bc94ec65d2`. The state's compatibility id
-folds in RECOMP_VERSION, so a translator change moves the hash even when
-emulation is unchanged: compare instruction totals (`RR_INTERP_HIST`) too.
+compiler and for linked-in code; current value (primrage, STATE_FORMAT 5): `469b07db1f697513`. The state no longer folds in the
+translator version (translated = interpreted), and leaves out the DAC
+output queue (host audio, not emulated state), so playing or recording
+sound doesn't change it. Rewind, run-ahead and netplay rollback
+(`state_checkpoint`/`state_rewind`/`state_rollback`) diff the serialized
+state per 4 KB page; `--rewind-test N` and `--runahead N` check them, and
+`--net-host`/`--net-join` run two-process netplay tests.
 Useful environment variables:
 
 - `RR_NOREC=1`: 68K on the interpreter; `RR_NODSP=1`: DSP on the

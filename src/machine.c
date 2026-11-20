@@ -62,6 +62,7 @@ void machine_reset(void) {
     mach.carrydsp = 0;
     mach.irq6_cyc = M68K_HZ / 250;
     mach.playfield_tile_bank = 0;
+    mach.frames = 0;
     // Wire the shared view, then map pages and reset both CPUs.
     rrm->abi = REC_ABI_VERSION;
     rrm->sizeof_m68k = (uint32_t)sizeof(m68k_t);
@@ -97,10 +98,17 @@ static int log_lines;
 void machine_frame(void) {
     uint32_t fk, fd, line;
     frame_budgets(&fk, &fd);
-    log_lines = getenv("RR_LOG_FRAME") && atoi(getenv("RR_LOG_FRAME")) >= 2;
+    {
+        static int log_frame = -1;
+        if (log_frame < 0) log_frame = getenv("RR_LOG_FRAME") ? atoi(getenv("RR_LOG_FRAME")) + 1 : 0;
+        log_lines = log_frame >= 3;
+        if (!log_frame) goto run;
+    }
     if (getenv("RR_LOG_FRAME"))
         fprintf(stderr, "frame fk=%u fd=%u lines=%u\n", fk, fd,
                 GT_LINES);
+run:
+    mach.frames++;
     for (line = 0; line < GT_LINES; line++) {
         uint32_t k0 = fk * line / GT_LINES, k1 = fk * (line + 1) / GT_LINES;
         uint32_t d0 = fd * line / GT_LINES, d1 = fd * (line + 1) / GT_LINES;

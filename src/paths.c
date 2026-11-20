@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <direct.h>
 #else
+#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -151,4 +152,29 @@ const char *find_data(const char *name, const char *roms_dir, char *buf, size_t 
     }
     snprintf(buf, n, "%srun/%s", data_dir(), name);
     return file_readable(buf) ? buf : name;
+}
+
+unsigned long long rr_ticks_us(void) {
+#ifdef _WIN32
+    LARGE_INTEGER f, c;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    return (unsigned long long)(c.QuadPart / f.QuadPart * 1000000 +
+            c.QuadPart % f.QuadPart * 1000000 / f.QuadPart);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long long)ts.tv_sec * 1000000u + (unsigned long long)ts.tv_nsec / 1000u;
+#endif
+}
+
+void rr_sleep_ms(int ms) {
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
 }

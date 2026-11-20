@@ -22,3 +22,6 @@ const char *find_data(const char *name, const char *roms_dir, char *buf, size_t 
 // Make a folder (one level); fine if it exists.
 void make_dir(const char *path);
 int file_readable(const char *path);
+// A monotonic clock in microseconds, and a sleep (no SDL).
+unsigned long long rr_ticks_us(void);
+void rr_sleep_ms(int ms);
