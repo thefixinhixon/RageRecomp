@@ -31,3 +31,7 @@ saves/
 *~
 .vscode/
 .idea/
+
+# MAME side effects when probing from the repo root
+cfg/
+nvram/

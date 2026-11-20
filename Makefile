@@ -94,6 +94,7 @@ dist: all
 	cp $(OUTDIR)/ragerecomp-headless dist/ 2>/dev/null || true
 	cp $(OUTDIR)/ragerecomp dist/ 2>/dev/null || true
 	cp README.md NOTICE dist/ 2>/dev/null || true
+	cp recomplauncher.json dist/ 2>/dev/null || true
 	@echo "staged in dist/ (add your own primrage.zip + tms32031.zip)"
 
 clean:

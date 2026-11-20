@@ -1,0 +1,17 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "RageRecomp",
+  "game": {
+    "kind": "folder",
+    "label": "Your MAME ROM folder with primrage.zip (Primal Rage 2.3). Add tms32031.zip too for full sound.",
+    "check": { "file": "primrage.zip" }
+  },
+  "start": {
+    "program": ["ragerecomp.exe", "ragerecomp"],
+    "args": ["--roms", "{game}", "--sdl"]
+  },
+  "exit_codes": {
+    "1": "It couldn't start. Make sure the ROM folder holds primrage.zip (and tms32031.zip for sound)."
+  }
+}
