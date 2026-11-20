@@ -176,7 +176,7 @@ void rec_run_dsp(void) {
             if (d->cycles <= 0) break;
             if (d->idle) {
                 d_check_irqs(d);
-                if (d->idle) break;
+                if (d->idle) { d->cycles = 0; break; }
             }
             // Repeat blocks loop back here (not from inside delay slots).
             if (d->dcount < 0 && (d->st & C31_ST_RM) && d->pc == d->re + 1) {
@@ -210,7 +210,7 @@ void rec_run_dsp(void) {
                             break;
                         }
                     }
-                    if (d->idle) break;
+                    if (d->idle) { d->cycles = 0; break; }
                 }
             }
         }

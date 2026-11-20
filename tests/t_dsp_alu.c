@@ -81,6 +81,54 @@ int main(void) {
         T_OK((peek_st() & C31_ST_N) != 0, "mix-entry cmpf sets N");
         T_OK(!d_cond(d, 9), "mix-entry BGT not taken");
     }
+    {
+        // FIX accepts any destination register (MAME's fix_reg
+        // decodes a 5-bit dreg). The voice mixer relies on
+        // FIX R4,RS ($20B5) bounding its loop and FIX R4,AR4
+        // ($2090) deriving the sample pointer; masking the
+        // destination to R0-R7 leaves RS/AR4 stale and clobbers
+        // an R register, which wedges the DSP in a wild mix.
+        c31_t *d = rrm->dsp;
+        poke(0x1002, 0x0C2A0000u); // 5440.0
+        // LDI $1002,AR0 / LDF *AR0,R4 / FIX R4,RS / FIX R4,AR4
+        poke(0x1110, 0x08681002u);
+        poke(0x1111, 0x0744C000u);
+        poke(0x1112, 0x05190004u);
+        poke(0x1113, 0x050C0004u);
+        {
+            char buf[128];
+            d_insn_t o;
+            d_decode(cage.ram[0x1112], &o);
+            c31_format(buf, &o, 0x1112);
+            T_SUBSTR(buf, "FIX", "fix test vector decodes");
+            T_OK(o.dreg == 25, "fix decodes 5-bit RS dest");
+        }
+        d->pc = 0x1110;
+        d->dcount = -1;
+        d->st = 0;
+        d->ie = 0;
+        d->iff = 0;
+        d->irq = 0;
+        d->cycles = 1000000;
+        d->r[1].man = 0x12345678;
+        d->r[1].exp = 5;
+        d->rs = 0xabcdefu;
+        d->ar[4] = 0xdeadbeefu;
+        c31_step(); // LDI AR0
+        c31_step(); // LDF R4
+        c31_step(); // FIX R4,RS
+        T_OK(d->rs == 0x1540u, "fix to RS sets RS");
+        T_OK(d->r[1].man == 0x12345678 && d->r[1].exp == 5,
+                "fix to RS leaves R1 alone");
+        T_OK(d->r[4].man == (int32_t)0x2A000000u,
+                "fix source float intact");
+        T_OK((peek_st() & (C31_ST_N | C31_ST_Z)) == 0,
+                "fix sets N/Z for positive result");
+        c31_step(); // FIX R4,AR4
+        T_OK(d->ar[4] == 0x1540u, "fix to AR4 sets AR4");
+        T_OK(d->r[4].man == (int32_t)0x2A000000u,
+                "fix to AR4 leaves R4 float alone");
+    }
     printf("# %d tests, %d failures\n", t_count, t_failures);
     return t_failures != 0;
 }

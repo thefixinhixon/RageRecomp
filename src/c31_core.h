@@ -1331,8 +1331,17 @@ static inline void d_exec(c31_t *d, const d_insn_t *o) {
         d_cmpi(d, d_ireg(d, o->dreg), d_gsrc_i(d, o, 1));
         return;
     case DOP_FIX:
-        d_gsrc_f(d, o, &d->r[o->dreg & 7]);
-        d_float2int(d, &d->r[o->dreg & 7], 1);
+        // FIX accepts any register as its destination (MAME's
+        // fix_reg decodes a 5-bit dreg); route non-R results
+        // through a temp so RS/ARx see the converted value.
+        d_gsrc_f(d, o, &t1);
+        if (o->dreg < 8) {
+            d->r[o->dreg] = t1;
+            d_float2int(d, &d->r[o->dreg], 1);
+        } else {
+            d_float2int(d, &t1, 1);
+            d_setreg(d, o->dreg, (uint32_t)t1.man);
+        }
         return;
     case DOP_FLOAT:
         s = d_gsrc_i(d, o, 1);

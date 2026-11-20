@@ -65,6 +65,8 @@ int c31_run(void) {
     c31_t *d = rrm->dsp;
     for (;;) {
         if (d->cycles <= 0) return C31_RUN_DONE;
-        if (c31_step()) return C31_RUN_IDLE;
+        // Idling eats the rest of the budget (MAME's m_icount = 0), so
+        // DMA/timers observe wall time even when nothing executes.
+        if (c31_step()) { d->cycles = 0; return C31_RUN_IDLE; }
     }
 }

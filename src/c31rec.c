@@ -368,8 +368,14 @@ static int d_emit_op(demit_t *x, const d_insn_t *in, uint32_t pc,
         return 1;
     case DOP_FIX:
         d_emit_gfsrc(x, in, "f0");
-        fprintf(f, "d->r[%u] = f0;\n", in->dreg & 7);
-        fprintf(f, "d_float2int(d, &d->r[%u], 1);\n", in->dreg & 7);
+        if (in->dreg < 8) {
+            fprintf(f, "d->r[%u] = f0;\n", in->dreg);
+            fprintf(f, "d_float2int(d, &d->r[%u], 1);\n", in->dreg);
+        } else {
+            fprintf(f, "d_float2int(d, &f0, 1);\n");
+            fprintf(f, "d_setreg(d, %u, (uint32_t)f0.man);\n",
+                    in->dreg);
+        }
         return 1;
     case DOP_FLOAT:
         d_emit_gsrc(x, in, 1, "v0");
