@@ -96,14 +96,14 @@ local use only; they are never shipped).
 ## Headless and regression use
 
 ```
-./ragerecomp --headless 3600 --script "coin 60, start1 120, ..."  # fixed run
-tools/regress.sh ./ragerecomp primrage   # boot + attract + fight, prints hash
+./ragerecomp-headless --roms run --frames 3600 --script "coin1 600, coin1 620, start1 700" --hash
+tools/regress.sh build-lnx/ragerecomp-headless primrage   # boot, coin-up, fight; prints hash
 ```
 
-Useful environment variables (`RR_NOREC=1` interpreter only,
-`RR_NODSP=1` DSP interpreter, `RR_WAV=out.wav` record audio,
-`RR_DUMP_AT=frame` snapshot RAM, `RR_DISPLAY_HZ=N` pacing tests).
-See CLAUDE.md for the full list.
+Useful environment variables: `RR_NOREC=1` (68K interpreter only),
+`RR_NODSP=1` (DSP interpreter), `RR_INTERP_HIST=file` (where the
+interpreters still ran). Translated and interpreted runs give the same
+hash. See CLAUDE.md for the full list.
 
 ## Release packages
 
@@ -113,12 +113,13 @@ files and no game code. Pushing a version tag builds them on GitHub Actions.
 
 ## Known issues
 
-- Audio is currently silent: the DSP sound program crashes a few seconds
-  after boot (frame ~283). The mechanism is mapped (voice-mix buffer
-  overrun into the task stack, then a wild jump to the boot stub) but
-  the scheduling trigger is still under investigation. Video, input,
-  coins, character select and fights all work.
-- Attract mode crashes with a 68K address error after ~40 seconds.
+- Work in progress: the interactive window is still minimal (fixed
+  keyboard keys, no menu, settings file, shaders, gamepads or save-state
+  keys yet), and the command line is `--roms DIR` plus the headless
+  switches in `--help`. The sections above describe the planned product.
+- Translated code is built with the system C compiler (gcc, clang); the
+  bundled TinyCC fallback and Windows module builds are not done yet, so
+  on Windows the game runs on the interpreter.
 
 ## Status and honesty
 

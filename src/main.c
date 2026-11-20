@@ -30,8 +30,98 @@
 
 static void usage(const char *argv0) {
     printf("usage: %s --roms DIR [--frames N] [--shot out.ppm] [--wav out.wav]\n"
-           "       %s --roms DIR --sdl\n",
+           "          [--script EVENTS] [--hash]\n"
+           "       %s --roms DIR --sdl\n"
+           "\n"
+           "--script: comma-separated \"INPUT FRAME[+FRAMES]\" presses, held\n"
+           "  6 frames unless given, e.g. \"coin1 60, start1 200, p1b1 400+30\".\n"
+           "  Inputs: coin1 coin2 service start1 start2, p1up p1down p1left\n"
+           "  p1right p1b1 p1b2 p1b3, and the same for p2.\n"
+           "--hash: print a hash of the whole machine state at the end.\n",
             argv0, argv0);
+}
+
+// ------------------------------------------------------------ scripted input
+
+typedef struct {
+    int frame, hold;
+    char name[16];
+} press_t;
+
+static press_t script[512];
+static int nscript;
+
+static int parse_script(const char *s) {
+    while (*s) {
+        press_t *e;
+        int n = 0;
+        while (*s == ' ' || *s == ',') s++;
+        if (!*s) break;
+        if (nscript >= (int)(sizeof(script) / sizeof(script[0]))) return -1;
+        e = &script[nscript];
+        e->hold = 6;
+        if (sscanf(s, "%15s %d%n", e->name, &e->frame, &n) < 2) return -1;
+        s += n;
+        if (*s == '+') {
+            if (sscanf(s + 1, "%d%n", &e->hold, &n) < 1) return -1;
+            s += 1 + n;
+        }
+        nscript++;
+    }
+    return 0;
+}
+
+// Cabinet bit for an input name: *byte points at the port byte (active
+// low), or *flag at a held-flag. Returns 0 if unknown.
+static int input_bit(const char *name, uint8_t **byte, uint8_t **flag) {
+    static const char *keys[8] = { "start", "b1", "b2", "b3", "right",
+        "left", "down", "up" };
+    int i;
+    *byte = *flag = NULL;
+    if (!strcmp(name, "coin1")) { *flag = &mach.in.coin1; return 1; }
+    if (!strcmp(name, "coin2")) { *flag = &mach.in.coin2; return 1; }
+    if (!strcmp(name, "service")) { *flag = &mach.in.service; return 1; }
+    if (!strcmp(name, "start1")) name = "p1start";
+    if (!strcmp(name, "start2")) name = "p2start";
+    if ((name[0] != 'p') || (name[1] != '1' && name[1] != '2')) return 0;
+    for (i = 0; i < 8; i++) {
+        if (!strcmp(name + 2, keys[i])) {
+            *byte = name[1] == '1' ? &mach.in.b3 : &mach.in.b1;
+            return 1 << i;
+        }
+    }
+    return 0;
+}
+
+// Apply the script's held inputs for this frame (before it runs).
+static void script_frame(int frame) {
+    int i;
+    mach.in.b1 = mach.in.b3 = 0xff;
+    mach.in.coin1 = mach.in.coin2 = mach.in.service = 0;
+    for (i = 0; i < nscript; i++) {
+        uint8_t *byte, *flag;
+        int bit = input_bit(script[i].name, &byte, &flag);
+        if (frame < script[i].frame || frame >= script[i].frame + script[i].hold)
+            continue;
+        if (byte) *byte &= (uint8_t)~bit;
+        if (flag) *flag = 1;
+    }
+}
+
+static uint64_t state_hash(void) {
+    uint32_t size, i;
+    uint8_t *blob;
+    uint64_t h = 1469598103934665603ull;
+    machine_state_size(&size);
+    blob = (uint8_t *)calloc(size, 1);
+    if (!blob) return 0;
+    machine_state_save(blob);
+    for (i = 0; i < size; i++) {
+        h ^= blob[i];
+        h *= 1099511628211ull;
+    }
+    free(blob);
+    return h;
 }
 
 static void write_ppm(const char *name) {
@@ -80,6 +170,18 @@ static void write_wav(const char *name, const int16_t *pcm, uint32_t frames,
     printf("wrote %s (%u frames)\n", name, frames);
 }
 
+// Use translated code: linked in, cached from an earlier run, or built
+// now. Without it the game still runs, on the interpreters.
+static void prepare_game_code(void) {
+    const char *cache = getenv("RR_CACHE_DIR") ? getenv("RR_CACHE_DIR") :
+            "cache";
+    if (!getenv("RR_NOREC") && !rec_have_m68k() && rec_build_m68k(cache))
+        fprintf(stderr, "rec: 68K code not translated, interpreting\n");
+    if (!getenv("RR_NODSP") && !rec_have_dsp() && rec_build_dsp(cache))
+        fprintf(stderr, "rec: DSP code not translated, interpreting\n");
+    machine_reset();    // the DSP build ran a warm-up boot
+}
+
 static int boot_machine(const char *romdir) {
     char z0[1024], z1[1024];
     const char *zips[2];
@@ -106,6 +208,7 @@ static int boot_machine(const char *romdir) {
     gtvid_mo_init();
     rec_init();
     machine_reset();
+    prepare_game_code();
     mach.in.b1 = 0xff;
     mach.in.b3 = 0xff;
     return 0;
@@ -222,7 +325,7 @@ int main(int argc, char **argv) {
     const char *shot = NULL;
     const char *wav = NULL;
     int frames = 600;
-    int want_sdl = 0;
+    int want_sdl = 0, want_hash = 0;
     int i;
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--roms") && i + 1 < argc) romdir = argv[++i];
@@ -231,6 +334,24 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--wav") && i + 1 < argc) wav = argv[++i];
         else if (!strcmp(argv[i], "--sdl")) want_sdl = 1;
+        else if (!strcmp(argv[i], "--hash")) want_hash = 1;
+        else if (!strcmp(argv[i], "--script") && i + 1 < argc) {
+            if (parse_script(argv[++i])) {
+                fprintf(stderr, "bad --script\n");
+                return 1;
+            }
+            {
+                int k;
+                for (k = 0; k < nscript; k++) {
+                    uint8_t *b, *fl;
+                    if (!input_bit(script[k].name, &b, &fl)) {
+                        fprintf(stderr, "unknown input in --script: %s\n",
+                                script[k].name);
+                        return 1;
+                    }
+                }
+            }
+        }
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             usage(argv[0]);
             return 0;
@@ -263,6 +384,7 @@ int main(int argc, char **argv) {
         if (!pcm) { fprintf(stderr, "out of memory\n"); return 1; }
         for (i = 0; i < frames; i++) {
             uint32_t n, k, got;
+            if (nscript) script_frame(i);
             machine_frame();
             n = cage_queued();
             if (n > 4096) n = 4096;
@@ -278,11 +400,16 @@ int main(int argc, char **argv) {
         write_wav(wav, pcm, got_frames, cage.dac_rate);
         free(pcm);
     } else {
-        for (i = 0; i < frames; i++) machine_frame();
+        for (i = 0; i < frames; i++) {
+            if (nscript) script_frame(i);
+            machine_frame();
+        }
     }
     printf("ran %d frames (68K pc=%06X, DSP pc=%06X)\n", frames,
             rrm->cpu->pc & 0xffffffu, rrm->dsp->pc & 0xffffffu);
     if (shot) write_ppm(shot);
+    if (want_hash)
+        printf("state hash %016llx\n", (unsigned long long)state_hash());
     rec_shutdown();
     return 0;
 }

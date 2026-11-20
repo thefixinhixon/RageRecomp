@@ -8,9 +8,6 @@
 // Linked-in modules (empty unless built with `make recomp`).
 extern const rec_module_t rec_linked_m68k;
 extern const rec_module_t rec_linked_dsp;
-// Linked-in DSP guard snapshot (empty unless `make recomp`).
-extern const uint32_t rec_linked_snap[];
-extern const uint8_t rec_linked_mask[];
 
 void rec_init(void);
 void rec_shutdown(void);

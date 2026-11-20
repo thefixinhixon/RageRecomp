@@ -30,7 +30,7 @@ typedef __SIZE_TYPE__ size_t;
 #endif
 
 // Bumped whenever anything below (or what modules expect of the program) changes.
-#define REC_ABI_VERSION 2
+#define REC_ABI_VERSION 3
 
 // Main CPU (68EC020, 24-bit bus) memory sizes.
 #define RR_ROM_SIZE   0x200000u   // program ROM at 0x000000
@@ -150,14 +150,13 @@ typedef struct {
     // CAGE speedup: DSP writes to this word burn 100 cycles (MAME's
     // write-hooked speedup). 0xFFFFFFFF = disabled.
     uint32_t dsp_speedup;
-    // Translated-DSP validity: dsp_snap holds the words the module was
-    // built from (lowmem 0-0xFFFF, then IRAM at 0x10000-0x107FF) and
-    // dsp_mask flags the code words. A write that changes a code word
-    // sets dsp_bad for its chunk (0-3 lowmem, 4 IRAM); the dispatcher
-    // interprets bad chunks. NULL mask = no module, nothing checked.
-    const uint32_t *dsp_snap;
+    // Translated-DSP validity: dsp_mask flags the code words the module
+    // was built from (indexed as drec_idx: lowmem 0-0xFFFF, then IRAM).
+    // A write that changes one bumps dsp_gen; translated DSP code then
+    // returns to the dispatcher, which re-checks each function against
+    // the module's image before entering it. NULL mask = no module.
     const uint8_t *dsp_mask;
-    uint8_t dsp_bad[8];
+    uint32_t dsp_gen;
 } rr_mem_t;
 
 typedef struct {
@@ -200,11 +199,16 @@ typedef struct {
 extern rr_mem_t *rrm;
 extern const rr_hostfns_t *rrfns;
 
-// A translated module: chunk functions with address ranges plus the
-// sorted label set the dispatcher tests membership in.
+// A translated module: functions with address ranges plus the sorted
+// entry labels. 68K modules give each label's function in label_fn (the
+// dispatcher maps pcs straight to functions). DSP modules also carry the
+// image they were translated from, for the code guard.
 typedef struct {
     uint32_t abi, kind; // REC_ABI_VERSION, 0 = 68K, 1 = DSP
     uint32_t nchunks, nlabels;
     const rec_func_t *chunks; // sorted by lo
     const uint32_t *labels;   // sorted pcs
+    const uint32_t *label_fn; // per label: index into chunks
+    const uint32_t *image;    // DSP: words translated (drec_idx layout)
+    const uint8_t *mask;      // DSP: which of them are code
 } rec_module_t;

@@ -74,10 +74,12 @@ The game's ROMs and code are copyrighted. This repo is public.
 - The C31 charges MAME's counts (1 base, +3 branches/calls/rets/RPTS,
   +4 trap). DSP DMA/timer periods are in DSP cycles off the same
   16.9344 MHz base as MAME's H1-derived attotime values; verified equal.
-- Translated and interpreted runs must behave the same on screen; compare
-  them when changing timing. Translated code takes interrupts at block
-  boundaries, so regression hashes legitimately differ between the two;
-  what must match is every build of the same translated code.
+- Translated and interpreted runs are bit-identical: translated code runs
+  each instruction exactly as the interpreter's step does (shared
+  semantics, cycles, then a check for slice end, faults and interrupts;
+  on the DSP also repeat blocks, delay slots and the per-instruction
+  interrupt check). So the regression hash is the same with or without
+  `RR_NOREC`/`RR_NODSP`, and any difference is a bug.
 
 ## Determinism
 
@@ -104,8 +106,17 @@ The game's ROMs and code are copyrighted. This repo is public.
   half the speed) → interpreter. All must give the same behaviour.
 - Keep instruction semantics in `m68k_core.h` / `c31_core.h` only; the
   interpreters and the translators share them.
-- Translated DSP code runs only where RAM still holds the words it came
-  from (`code_ok` in `cage.c`).
+- Every instruction start is an entry label; the dispatchers (`rec.c`)
+  map a pc straight to its function and fall back to the interpreter only
+  where nothing was translated (`RR_INTERP_HIST=file` lists where, with
+  counts; it should stay empty).
+- Code discovery: descent from the vectors, compiled switch tables, then
+  pointer candidates (operands, every long in ROM / word in DSP RAM) that
+  decode plausibly. Guesses may overlap; the emitters jump explicitly
+  wherever the next emitted instruction is not the real successor.
+- Translated DSP code runs only while DSP memory still holds the words it
+  was translated from: a write changing a code word bumps `dsp_gen`, and
+  the dispatcher re-checks each function against the module's image.
 
 ## Product rules
 
@@ -139,19 +150,20 @@ state hash:
 
     tools/regress.sh PROGRAM SET [RUN_DIR] [WORK_DIR]
 
-Translated and interpreted runs give different hashes, both valid, because
-translated code takes interrupts at block boundaries. What must match is
-every build of the same translated code (any compiler, linked-in or built
-at first launch). Useful environment variables:
+The hash is the same for translated and interpreted runs and for every
+compiler; current value (primrage, RECOMP_VERSION 6): `b19b9ca808cfff66`.
+Useful environment variables:
 
-- `RR_NOREC=1`: 68K interpreter only (different but fixed hash).
-- `RR_NODSP=1`: sound DSP on the interpreter (same hash either way).
+- `RR_NOREC=1`: 68K on the interpreter; `RR_NODSP=1`: DSP on the
+  interpreter. Same hash either way.
+- `RR_INTERP_HIST=file`: where the interpreters ran while translated code
+  was active (missing entry points), plus instruction totals.
 - `RR_LOAD_MODULE=path.so`: use a given module.
-- `RR_DISPLAY_HZ=N`: pretend the display refreshes at N Hz, to test frame
-  pacing (under Xvfb vsync never waits, so ~60 Hz falls back to audio).
-- `RR_BUILD=1 RR_BUILD_WITH=cc|tcc`: build the module now, headless.
-- `RR_DUMP_AT`, `RR_WAV`, `RR_POKE`, `RR_LOG_SOUND`, `RR_CONSOLE`: as in
-  UltraCombo (`KI2_*`), renamed.
+- `RR_BUILD=1 RR_BUILD_WITH=cc|gcc|clang|tcc`: rebuild the modules now.
+- `RR_CACHE_DIR=dir`: where modules are cached (default `cache`).
+- `RR_LOG_FRAME=2`: 68K position after every scanline (for bisecting a
+  divergence between two runs); `RR_DUMP_DSP=file`: the DSP image the
+  translator planned from.
 
 Packages (no game files, no game code):
 
@@ -171,32 +183,33 @@ held a few frames, because input is sampled once per frame and quick `key`
 taps get missed. Run a copy of the program from a scratch folder so it gets
 its own `ragerecomp.ini`.
 
-Headless switches: see `usage()` in `main.c` (`--headless`, `--script`,
-`--save-at`, `--load`). Debug environment variables, all read with
+Headless switches: see `usage()` in `main.c` (`--frames`, `--script`,
+`--hash`, `--shot`, `--wav`). Debug environment variables, all read with
 `getenv` in `src/` (grep them for details).
 
 ## Status (kept honest: update when it changes)
 
 - 68EC020 interpreter + translator: complete ISA incl. 020 addressing
-  modes, exceptions, autovector interrupts; 222 unit tests pass on Linux
-  and Windows (Wine). Interpreter/translator parity not yet verified.
+  modes, exceptions, autovector interrupts. The translator finds 81,915
+  instructions (all code below 0x50000) and a 3600-frame coin-up and
+  fight runs with zero interpreted instructions.
 - CAGE DSP interpreter + translator: complete C31 ISA incl. parallel
   ops, delay slots, DMA/timers/serial/host comm; float ALU verified
-  bit-identical to MAME's integer model on probed vectors. Translated
-  DSP parity not yet verified.
-- GT video, CAGE audio path, protection, EEPROM: implemented from MAME.
-- Save states: implemented. Rewind/netplay: not implemented (noted later).
-- Verified: 222 unit tests pass; Linux + Windows cross builds clean;
-  headless boot to title/attract/coin/start/fight with screenshots.
-- KNOWN BUG (audio silent): the DSP sound program crashes ~frame 283
-  (0x2041 voice-mix overruns its low-RAM buffer into the task stack at
-  0x557C, wild jump through sound ROM, lands in the boot stub and hangs
-  waiting serial). The 68K→DSP latch then sticks busy so no music plays.
-  Command values, DMA/DINT0 rates, timers, tables and float math all
-  match MAME; the trigger is scheduling (our sound-init burst lands ~5
-  frames later than MAME's). WAV output captures the resulting silence.
-- KNOWN BUG (attract crash): 68K address-error ~frame 2300 in attract
-  mode (odd pointer from an object table). Unrelated to the DSP issue.
+  bit-identical to MAME's integer model on probed vectors. The
+  translator finds 13,143 instructions (RAM, IRAM and the boot ROM's
+  routines); zero interpreted instructions in the same run.
+- Parity: translated, translated-68K-only and fully interpreted runs give
+  the same regression hash; gcc and clang modules too.
+- GT video, CAGE audio path (music and effects play), protection, EEPROM:
+  implemented from MAME. Save states: implemented in the core.
+- Verified: 242 unit tests pass; Linux + Windows cross builds clean.
+- Modules build at first launch with the system compiler (gcc ~25 s on 8
+  cores, clang ~2.5 min). Not yet: TinyCC in-process fallback and
+  Windows module builds (UltraCombo loads libtcc; to be ported).
+- Frontend: still the minimal SDL window in `main.c` (SDL renderer, fixed
+  keys, Esc quits). The menu, `ragerecomp.ini`, OpenGL video and shaders,
+  gamepads, save-state keys, `data_dir()`, `make recomp`/`make packages`
+  and the release workflow described above are not written yet.
 - CI (`.github/workflows/ci.yml`) builds Linux + Windows and runs tests
   (Windows under Wine); written but never executed on GitHub Actions.
 

@@ -158,30 +158,9 @@ void machine_state_save(uint8_t *dst) {
     gt_state_save(p);
 }
 
-// Re-validate the translated DSP chunks against the session snapshot.
+// DSP RAM was replaced: translated functions are re-checked before use.
 static void dsp_revalidate(void) {
-    uint32_t c;
-    if (!rrm->dsp_snap || !rrm->dsp_mask) return;
-    memset(rrm->dsp_bad, 0, sizeof(rrm->dsp_bad));
-    for (c = 0; c < 4; c++) {
-        uint32_t a;
-        for (a = c * 0x4000u; a < (c + 1) * 0x4000u; a++) {
-            if (rrm->dsp_mask[a] && cage.ram[a] != rrm->dsp_snap[a]) {
-                rrm->dsp_bad[c] = 1;
-                break;
-            }
-        }
-    }
-    {
-        uint32_t a;
-        for (a = 0; a < 0x800u; a++) {
-            if (rrm->dsp_mask[0x10000u + a] &&
-                    cage.iram[a] != rrm->dsp_snap[0x10000u + a]) {
-                rrm->dsp_bad[4] = 1;
-                break;
-            }
-        }
-    }
+    rrm->dsp_gen++;
 }
 
 int machine_state_load(const uint8_t *src, uint32_t size) {
@@ -283,7 +262,8 @@ int machine_state_load(const uint8_t *src, uint32_t size) {
     mach.in.b3 = (uint8_t)get32(p + 28);
     mach.in.service = (uint8_t)get32(p + 32);
     mach.in.coin1 = (uint8_t)get32(p + 36);
-    mach.in.tilt = (uint8_t)get32(p + 40);
+    mach.in.coin2 = (uint8_t)get32(p + 40);
+    mach.in.tilt = (uint8_t)get32(p + 44);
     p += 48;
     gt_state_load(p);
     // Derived state: re-derive the DSP float word rate (done above),

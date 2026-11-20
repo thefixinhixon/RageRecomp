@@ -424,7 +424,12 @@ static inline int m68k_decode(uint32_t pc, const uint16_t *words, int nwords,
     int u1, u2;
     o->op = MOP_ILL; o->sz = MSZ_W; o->cc = 0; o->r1 = 0; o->r2 = 0;
     o->imm = 4; o->imm2 = 0; o->len = 1; o->flow = MFLW_TRAP; o->cycles = 4;
-    o->ea.mode = MEA_D; o->ea.reg = 0; o->ea.imm = 0; o->ea.immw = 0;
+    // Every field set: callers may reuse o, and the interpreter and the
+    // translator must see the same decode whatever o held before.
+    o->ea.mode = MEA_D; o->ea.reg = 0; o->ea.disp = 0; o->ea.ireg = 0;
+    o->ea.ilong = 0; o->ea.scale = 0; o->ea.bdsz = 0; o->ea.odsz = 0;
+    o->ea.iis = 0; o->ea.bs = 0; o->ea.isup = 0; o->ea.od = 0;
+    o->ea.imm = 0; o->ea.immw = 0;
     o->eb = o->ea;
     if (nwords < 1) { o->op = MOP_ILL; return 0; }
     w = words[0];

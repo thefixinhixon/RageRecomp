@@ -314,34 +314,35 @@ static inline uint32_t rr_drd(uint32_t a) {
     return rrfns->drd(a);
 }
 
-// CAGE speedup plus translated-code guard, checked on every DSP write.
-// Chunk layout must match rec_build.c (0-3: lowmem quarters, 4: IRAM).
-static inline void d_code_wrote(uint32_t a, uint32_t v) {
-    if (a == rrm->dsp_speedup) rrm->dsp->cycles -= 100;
-    if (rrm->dsp_mask) {
-        uint32_t idx = 0xffffffffu;
-        int chunk = -1;
-        if (a < 0x10000u) {
-            idx = a;
-            chunk = (int)(a >> 14);
-        } else if (a >= 0x809800u && a < 0x80a000u) {
-            idx = 0x10000u + (a - 0x809800u);
-            chunk = 4;
-        }
-        if (chunk >= 0 && rrm->dsp_mask[idx] && v != rrm->dsp_snap[idx])
-            rrm->dsp_bad[chunk] = 1;
-    }
+// The translated address space: lowmem RAM 0-0xFFFF, then IRAM
+// 0x809800-0x809FFF, as one index range (the code guard's layout).
+#define DREC_WORDS 0x10800u
+
+static inline int drec_idx(uint32_t a) {
+    a &= 0xffffffu;
+    if (a < 0x10000u) return (int)a;
+    if (a >= 0x809800u && a < 0x80a000u) return (int)(0x10000u + a - 0x809800u);
+    return -1;
 }
 
+static inline uint32_t drec_addr(uint32_t i) {
+    return i < 0x10000u ? i : 0x809800u + (i - 0x10000u);
+}
+
+// Every DSP write: the CAGE speedup (MAME's write-hooked idle loop) and
+// the translated-code guard (a changed code word bumps dsp_gen).
 static inline void rr_dwr(uint32_t a, uint32_t v) {
+    uint32_t *p;
+    int i;
     a &= 0xffffffu;
-    d_code_wrote(a, v);
-    {
-        uint32_t *p = rrm->dwr[a >> 16];
-        if (p) {
-            p[a & 0xffffu] = v;
-            return;
-        }
+    if (a == rrm->dsp_speedup) rrm->dsp->cycles -= 100;
+    p = rrm->dwr[a >> 16];
+    if (rrm->dsp_mask && (i = drec_idx(a)) >= 0 && rrm->dsp_mask[i] &&
+            (p ? p[a & 0xffffu] : rrfns->drd(a)) != v)
+        rrm->dsp_gen++;
+    if (p) {
+        p[a & 0xffffu] = v;
+        return;
     }
     rrfns->dwr(a, v);
 }
@@ -1201,51 +1202,33 @@ static inline void d_check_irqs(c31_t *d) {
     d->cycles -= 4 * (d->lopower ? 16 : 1);
 }
 
-// Repeat-block check, as MAME does before every fetch. Returns nonzero
-// when it redirected pc (the caller must re-dispatch, not fall through).
-static inline int d_repeat_check(c31_t *d) {
-    if ((d->st & C31_ST_RM) && d->pc == d->re + 1) {
-        if ((int32_t)--d->rc >= 0) {
-            d->pc = d->rs & 0xffffffu;
-            return 1;
-        }
-        d->st &= ~C31_ST_RM;
-        d->rpts_active = 0;
-    }
-    return 0;
-}
-
-// Leave translated code when the slice is over, the DSP idles, or an
-// interrupt is pending (delay slots and RPTS repeats defer them).
-static inline int d_dpoll(void) {
-    c31_t *d = rrm->dsp;
-    uint32_t valid;
-    if (d->cycles <= 0 || d->idle) return 1;
-    if (d->dcount >= 0 || d->rpts_active) return 0;
-    valid = d->iff & d->ie & 0xfffu;
-    return (valid && (d->st & C31_ST_GIE)) ? 1 : 0;
-}
-
-// Block epilogue. RR_JUMP covers both chunk exits and repeat redirects.
-static inline rr_rc_t d_blk_end(uint32_t fallthrough_pc, int cycles,
-        uint32_t ninstrs) {
-    c31_t *d = rrm->dsp;
-    d->pc = fallthrough_pc;
-    d->cycles -= cycles * (d->lopower ? 16 : 1);
-    d->total += ninstrs;
-    if (d_repeat_check(d)) return RR_JUMP;
-    if (d_dpoll()) return RR_EXIT;
-    return RR_CONT;
-}
-
-static inline rr_rc_t d_blk_jump(uint32_t target_pc, int cycles,
-        uint32_t ninstrs) {
-    c31_t *d = rrm->dsp;
-    d->pc = target_pc;
-    d->cycles -= cycles * (d->lopower ? 16 : 1);
-    d->total += ninstrs;
-    return RR_JUMP;
-}
+// One translated instruction, exactly as c31_step runs it: repeat-block
+// loop-back, fetch-free execute, cycles, delay slots, interrupts. Leaves
+// when the slice ends, the DSP idles or code was overwritten. Expects
+// `d`, `gen` and a `dispatch` label in the enclosing function.
+#define DI(PC, INS, XC) do { \
+        if (d->dcount < 0 && (d->st & C31_ST_RM) && d->pc == d->re + 1) { \
+            if ((int32_t)--d->rc >= 0) { \
+                d->pc = d->rs & 0xffffffu; \
+                goto dispatch; \
+            } \
+            d->st &= ~C31_ST_RM; \
+            d->rpts_active = 0; \
+        } \
+        d->pc = ((PC) + 1) & 0xffffffu; \
+        d_exec(d, &(INS)); \
+        d->cycles -= (1 + (XC)) * (d->lopower ? 16 : 1); \
+        d->total++; \
+        if (d->dcount > 0) { \
+            d->dcount--; \
+        } else if (d->dcount == 0) { \
+            d->pc = d->djump & 0xffffffu; \
+            d->dcount = -1; \
+        } \
+        d_check_irqs(d); \
+        if (d->cycles <= 0 || d->idle || rrm->dsp_gen != gen) \
+            return RR_EXIT; \
+    } while (0)
 
 // ------------------------------------------------------------- execute
 
@@ -2018,36 +2001,5 @@ static inline void d_exec_rest(c31_t *d, const d_insn_t *o) {
             d_def_apply(d, dd, dvv);
             return;
         }
-    }
-}
-
-// Slow path for delayed branches whose slots contain control flow (the
-// translator inlines straight-line slots). Runs the branch plus its slots
-// through the shared semantics with the pipeline model, then returns with
-// pc at the jump target (or past the slots when not taken).
-static inline void d_exec_delayed_slow(c31_t *d, uint32_t pc) {
-    d_insn_t in;
-    int steps;
-    d_decode(rr_drd(pc), &in);
-    d->pc = (pc + 1) & 0xffffffu;
-    d_exec(d, &in);
-    d->cycles -= (1 + in.xcycles) * (d->lopower ? 16 : 1);
-    d->total++;
-    for (steps = 0; steps < 64 && d->dcount >= 0; steps++) {
-        if (d->dcount == 0) {
-            d->pc = d->djump & 0xffffffu;
-            d->dcount = -1;
-            break;
-        }
-        d_decode(rr_drd(d->pc), &in);
-        d->pc = (d->pc + 1) & 0xffffffu;
-        d_exec(d, &in);
-        d->cycles -= (1 + in.xcycles) * (d->lopower ? 16 : 1);
-        d->total++;
-        if (d->dcount > 0) d->dcount--;
-    }
-    if (d->dcount == 0) {
-        d->pc = d->djump & 0xffffffu;
-        d->dcount = -1;
     }
 }

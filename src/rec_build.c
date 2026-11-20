@@ -20,6 +20,7 @@
 #define REC_CC "gcc"
 #else
 #include <dlfcn.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #define REC_SONAME "rec_%s.so"
@@ -103,11 +104,14 @@ static const char *find_cc(void) {
 }
 
 // Compile the module sources in dir into outfile. Returns 0 on success.
+// Each file compiles on its own (in parallel where the shell allows), then
+// they link into one shared library without the C library. The compiler's
+// output goes to build.log in dir.
 static int compile_module(const char *dir, const char *outfile,
         const char *files) {
     const char *cc = getenv("RR_BUILD_WITH");
-    char cmd[4224];
-    char first[2048];
+    const char *opt;
+    char cmd[32768];
     int is_tcc;
     if (!cc || !cc[0]) cc = find_cc();
     if (!cc) {
@@ -115,33 +119,37 @@ static int compile_module(const char *dir, const char *outfile,
         return -1;
     }
     is_tcc = strstr(cc, "tcc") != NULL;
-    if (is_tcc) {
-        snprintf(first, sizeof(first), "%s -O2 -shared -o \"%s\" %s",
-                cc, outfile, files);
+    {   // the commands run inside dir
+        const char *b = strrchr(outfile, '/');
+        const char *b2 = strrchr(outfile, '\\');
+        if (b2 && (!b || b2 > b)) b = b2;
+        if (b) outfile = b + 1;
     }
+    // -O1: the translated functions are huge and goto-heavy; -O2 costs
+    // much more compile time for little speed.
+    opt = is_tcc ? "" : "-O1";
 #ifdef _WIN32
-    else
-        snprintf(first, sizeof(first), "%s -O2 -shared -o \"%s\" %s", cc,
-                outfile, files);
-#else
-    else
-        snprintf(first, sizeof(first), "%s -O2 -fPIC -shared -nostdlib -o "
-                "\"%s\" %s 2>/dev/null", cc, outfile, files);
-#endif
-    snprintf(cmd, sizeof(cmd), "cd \"%s\" && %s", dir, first);
+    snprintf(cmd, sizeof(cmd), "cd /d \"%s\" && %s %s -w -shared -o \"%s\" "
+            "%s > build.log 2>&1", dir, cc, opt, outfile, files);
     if (system(cmd) == 0) return 0;
-#ifndef _WIN32
-    // Retry without -nostdlib (some toolchains need the CRT to link).
-    snprintf(first, sizeof(first), "%s -O2 -fPIC -shared -o \"%s\" %s",
-            cc, outfile, files);
-    snprintf(cmd, sizeof(cmd), "cd \"%s\" && %s", dir, first);
-    if (system(cmd) == 0) {
-        fprintf(stderr, "ragerecomp: module needed libc to link "
-                "(harmless)\n");
-        return 0;
+#else
+    {
+        long jobs = sysconf(_SC_NPROCESSORS_ONLN);
+        if (jobs < 1) jobs = 1;
+        snprintf(cmd, sizeof(cmd), "cd \"%s\" && rm -f *.o && for f in %s; "
+                "do echo $f; done | xargs -P %ld -I{} %s %s -fPIC -w -c {} "
+                "-o {}.o > build.log 2>&1 && %s -shared -nostdlib -o \"%s\" "
+                "*.o >> build.log 2>&1", dir, files, jobs, cc, opt, cc,
+                outfile);
+        if (system(cmd) == 0) return 0;
+        // Some toolchains need the C runtime to link a shared library.
+        snprintf(cmd, sizeof(cmd), "cd \"%s\" && %s -shared -o \"%s\" *.o "
+                ">> build.log 2>&1", dir, cc, outfile);
+        if (system(cmd) == 0) return 0;
     }
 #endif
-    fprintf(stderr, "ragerecomp: module compile failed\n");
+    fprintf(stderr, "ragerecomp: module compile failed (see %s/build.log)\n",
+            dir);
     return -1;
 }
 
@@ -158,6 +166,11 @@ static void *open_module(const char *path, const rec_module_t **out,
         const char *sym, int is_dsp) {
     void *h;
     void (*initfn)(rr_mem_t *, const rr_hostfns_t *);
+    {   // not built yet: a cache miss, not an error
+        FILE *probe = fopen(path, "rb");
+        if (!probe) return NULL;
+        fclose(probe);
+    }
 #ifdef _WIN32
     h = LoadLibraryA(path);
     if (!h) return NULL;
@@ -190,11 +203,6 @@ static void *open_module(const char *path, const rec_module_t **out,
 
 // ------------------------------------------------------------- 68K module
 
-static uint32_t rom32(const uint8_t *rom, uint32_t off) {
-    return ((uint32_t)rom[off] << 24) | ((uint32_t)rom[off + 1] << 16) |
-            ((uint32_t)rom[off + 2] << 8) | rom[off + 3];
-}
-
 int rec_build_m68k(const char *cache_dir) {
     char key[128], dir[1024], out[1024], sym[64];
     const rec_module_t *mod = NULL;
@@ -225,73 +233,19 @@ int rec_build_m68k(const char *cache_dir) {
     // Cache miss: plan, emit, compile.
     {
         rec_plan_t plan;
-        int chunk, nchunks = 0, v;
-        char files[4096], path[1024];
-        FILE *f;
-        uint32_t *labels;
-        int nlabels;
+        char files[16384];
+        int rc;
         mkdir_p(dir);
         if (write_headers(dir)) return -1;
-        m68krec_plan_init(&plan, mach.rom, 0x200000u);
-        m68krec_plan_entry(&plan, rom32(mach.rom, 4) & 0xffffffu);
-        for (v = 2; v < 256; v++) {
-            uint32_t t = rom32(mach.rom, (uint32_t)v * 4);
-            if (t < 0x200000u && !(t & 1)) m68krec_plan_entry(&plan, t);
-        }
-        m68krec_plan_run(&plan);
+        m68krec_plan(&plan, mach.rom, 0x200000u);
+        fprintf(stderr, "rec: 68K code %u instructions below %06X, %u "
+                "functions (%u found by pointers)\n", plan.ninsns,
+                plan.limit, plan.nfuncs, plan.nptr);
         files[0] = 0;
-        for (chunk = 0; chunk < 32; chunk++) {
-            uint32_t lo = (uint32_t)chunk << 16, hi = lo + 0x10000u;
-            uint32_t covered;
-            snprintf(path, sizeof(path), "%s/rec_%02d.c", dir, chunk);
-            f = fopen(path, "w");
-            if (!f) {
-                m68krec_plan_free(&plan);
-                return -1;
-            }
-            covered = m68krec_emit(f, &plan, lo, hi, chunk);
-            fclose(f);
-            {
-                char one[32];
-                snprintf(one, sizeof(one), "rec_%02d.c ", chunk);
-                if (strlen(files) + strlen(one) < sizeof(files) - 1)
-                    strcat(files, one);
-            }
-            if (covered) nchunks++;
-        }
-        // Exports file.
-        nlabels = plan.nstarts;
-        labels = plan.starts;
-        snprintf(path, sizeof(path), "%s/exports.c", dir);
-        f = fopen(path, "w");
-        if (!f) {
-            m68krec_plan_free(&plan);
-            return -1;
-        }
-        fprintf(f, "// Generated by rec_build. Do not edit.\n");
-        fprintf(f, "#define REC_MODULE 1\n");
-        fprintf(f, "#include \"rec_abi.h\"\n");
-        fprintf(f, "rr_mem_t *rrm;\nconst rr_hostfns_t *rrfns;\n");
-        fprintf(f, "void rec_init_module(rr_mem_t *m, "
-                "const rr_hostfns_t *f) { rrm = m; rrfns = f; }\n");
-        for (chunk = 0; chunk < 32; chunk++)
-            fprintf(f, "rec_fn_t rec_chunk_%d_fn(void);\n", chunk);
-        fprintf(f, "static const rec_func_t chunks[] = {\n");
-        for (chunk = 0; chunk < 32; chunk++)
-            fprintf(f, "{rec_chunk_%d_fn(), 0x%xu, 0x%xu},\n", chunk,
-                    chunk << 16, (chunk << 16) + 0x10000u);
-        fprintf(f, "};\nstatic const uint32_t labels[] = {\n");
-        for (v = 0; v < nlabels; v++) {
-            fprintf(f, "0x%xu,", labels[v]);
-            if ((v & 7) == 7) fprintf(f, "\n");
-        }
-        fprintf(f, "\n};\nconst rec_module_t rec_exported_m68k = {%d, 0, "
-                "32, %d, chunks, labels};\n", REC_ABI_VERSION, nlabels);
-        fclose(f);
-        strcat(files, "exports.c ");
+        rc = m68krec_write(&plan, dir, "rec_exported_m68k", files,
+                sizeof(files));
         m68krec_plan_free(&plan);
-        if (nchunks == 0) return -1;
-        if (compile_module(dir, out, files)) return -1;
+        if (rc || compile_module(dir, out, files)) return -1;
     }
     h = open_module(out, &mod, sym, 0);
     if (h && rec_use_m68k(mod, h) == 0) return 0;
@@ -324,60 +278,34 @@ static int dsp_warm_ok(void) {
     return in_ram && cage.iram && cage.iram[0x7c0] != 0;
 }
 
-// Session snapshot for the translated-code guard (see rec_abi.h).
-static uint32_t *dsp_snap_buf = NULL;
-static uint8_t *dsp_mask_buf = NULL;
-
-static void dsp_snap_free(void) {
-    free(dsp_snap_buf);
-    free(dsp_mask_buf);
-    dsp_snap_buf = NULL;
-    dsp_mask_buf = NULL;
-    rrm->dsp_snap = NULL;
-    rrm->dsp_mask = NULL;
-}
-
-static int dsp_snap_save(const char *dir) {
-    char path[1024];
-    snprintf(path, sizeof(path), "%s/snap.bin", dir);
-    if (write_file(path, (const char *)dsp_snap_buf,
-            0x10800u * 4))
-        return -1;
-    snprintf(path, sizeof(path), "%s/mask.bin", dir);
-    if (write_file(path, (const char *)dsp_mask_buf, 0x10800u))
-        return -1;
-    return 0;
-}
-
-static int dsp_snap_load(const char *dir) {
-    char path[1024];
-    FILE *f;
-    dsp_snap_free();
-    dsp_snap_buf = (uint32_t *)malloc(0x10800u * 4);
-    dsp_mask_buf = (uint8_t *)malloc(0x10800u);
-    if (!dsp_snap_buf || !dsp_mask_buf) {
-        dsp_snap_free();
+// Boot the sound program on the interpreter and find its code. Leaves the
+// machine reset. Returns 0 with the plan filled.
+static int dsp_plan_warm(drec_plan_t *plan) {
+    uint32_t entries[72], i;
+    int n = 0;
+    dsp_warmup_run();
+    if (!dsp_warm_ok()) {
+        fprintf(stderr, "rec: DSP warm-up boot failed\n");
+        machine_reset();
         return -1;
     }
-    snprintf(path, sizeof(path), "%s/snap.bin", dir);
-    f = fopen(path, "rb");
-    if (!f || fread(dsp_snap_buf, 4, 0x10800u, f) != 0x10800u) {
-        if (f) fclose(f);
-        dsp_snap_free();
-        return -1;
+    memset(plan, 0, sizeof(*plan));
+    // The code as the DSP fetches it (0-0xFFF reads the boot ROM shadow).
+    for (i = 0; i < DREC_WORDS; i++) plan->img[i] = rrfns->drd(drec_addr(i));
+    if (getenv("RR_DUMP_DSP")) {  // debug: the image planned from
+        FILE *f = fopen(getenv("RR_DUMP_DSP"), "wb");
+        if (f) {
+            fwrite(plan->img, 4, DREC_WORDS, f);
+            fclose(f);
+        }
     }
-    fclose(f);
-    snprintf(path, sizeof(path), "%s/mask.bin", dir);
-    f = fopen(path, "rb");
-    if (!f || fread(dsp_mask_buf, 1, 0x10800u, f) != 0x10800u) {
-        if (f) fclose(f);
-        dsp_snap_free();
-        return -1;
-    }
-    fclose(f);
-    rrm->dsp_snap = dsp_snap_buf;
-    rrm->dsp_mask = dsp_mask_buf;
-    memset(rrm->dsp_bad, 0, sizeof(rrm->dsp_bad));
+    // Where the boot left off, then the interrupt and trap vectors.
+    entries[n++] = rrm->dsp->pc & 0xffffffu;
+    for (i = 1; i < 64; i++) entries[n++] = rrfns->drd(i) & 0xffffffu;
+    drec_plan(plan, entries, n);
+    fprintf(stderr, "rec: DSP code %u instructions, %u functions (%u found "
+            "by pointers)\n", plan->ninsns, plan->nfuncs, plan->nptr);
+    machine_reset();
     return 0;
 }
 
@@ -388,41 +316,13 @@ int rec_build_dsp(const char *cache_dir) {
     uint32_t crc0, crc1;
     if (!mach.rom || !cage.srom || !cage.boot) return -1;
     if (getenv("RR_LOAD_MODULE")) {
-        // Explicit module: still warm up so the guard has an image.
-        dsp_warmup_run();
-        if (!dsp_warm_ok()) {
-            machine_reset();
-            return -1;
-        }
-        h = open_module(getenv("RR_LOAD_MODULE"), &mod,
-                "rec_exported_dsp", 1);
-        if (h && rec_use_dsp(mod, h) == 0) {
-            // Snapshot the warmed image for the guard.
-            dsp_snap_free();
-            dsp_snap_buf = (uint32_t *)malloc(0x10800u * 4);
-            dsp_mask_buf = (uint8_t *)malloc(0x10800u);
-            if (dsp_snap_buf && dsp_mask_buf) {
-                memcpy(dsp_snap_buf, cage.ram, 0x10000u * 4);
-                memcpy(dsp_snap_buf + 0x10000u, cage.iram, 0x800u * 4);
-                // No plan here, so no mask: trust the explicit module.
-                memset(dsp_mask_buf, 0, 0x10800u);
-                rrm->dsp_snap = dsp_snap_buf;
-                rrm->dsp_mask = dsp_mask_buf;
-                memset(rrm->dsp_bad, 0, sizeof(rrm->dsp_bad));
-            } else {
-                dsp_snap_free();
-            }
-            machine_reset();
-            return 0;
-        }
+        h = open_module(getenv("RR_LOAD_MODULE"), &mod, "rec_exported_dsp", 1);
+        if (h && rec_use_dsp(mod, h) == 0) return 0;
         if (h) rec_close_handle(h);
-        machine_reset();
         return -1;
     }
-    crc0 = crc32_buf((const uint8_t *)cage.srom,
-            RR_DSP_ROM_WORDS * 4);
-    crc1 = crc32_buf((const uint8_t *)cage.boot,
-            RR_DSP_BOOT_WORDS * 4);
+    crc0 = crc32_buf((const uint8_t *)cage.srom, RR_DSP_ROM_WORDS * 4);
+    crc1 = crc32_buf((const uint8_t *)cage.boot, RR_DSP_BOOT_WORDS * 4);
     snprintf(sym, sizeof(sym), "rec_exported_dsp");
     snprintf(key, sizeof(key), "a%dv%dg%08x%08x", REC_ABI_VERSION,
             RECOMP_VERSION, crc0, crc1);
@@ -430,137 +330,27 @@ int rec_build_dsp(const char *cache_dir) {
     snprintf(out, sizeof(out), "%s/" REC_SONAME, dir, "dsp");
     if (!getenv("RR_BUILD")) {
         h = open_module(out, &mod, sym, 1);
-        if (h && rec_use_dsp(mod, h) == 0) {
-            // Cached module: load its snapshot for the guard.
-            if (dsp_snap_load(dir)) {
-                // No snapshot: run unguarded (same ROMs, same image).
-                dsp_snap_free();
-            }
-            return 0;
-        }
-        if (h) {
-            rec_close_handle(h);
-            h = NULL;
-        }
+        if (h && rec_use_dsp(mod, h) == 0) return 0;
+        if (h) rec_close_handle(h);
+        h = NULL;
     }
-    // Cache miss: warm up the DSP, then plan, emit, compile.
-    dsp_warmup_run();
-    if (!dsp_warm_ok()) {
-        machine_reset();
-        return -1;
-    }
+    // Cache miss: boot, plan, emit, compile.
     {
-        drec_plan_t plow, piram;
-        int chunk, nchunks = 0, v;
-        char files[1024], path[1024];
-        FILE *f;
-        uint32_t endpc;
-        static const uint32_t clo[5] = { 0, 0x4000, 0x8000, 0xc000,
-            0x809800u };
-        static const uint32_t chi[5] = { 0x4000, 0x8000, 0xc000,
-            0x10000u, 0x80a000u };
+        drec_plan_t *plan = (drec_plan_t *)calloc(1, sizeof(*plan));
+        char files[4096];
+        int rc;
+        if (!plan) return -1;
         mkdir_p(dir);
-        if (write_headers(dir)) {
-            machine_reset();
+        if (write_headers(dir) || dsp_plan_warm(plan)) {
+            free(plan->work);
+            free(plan);
             return -1;
         }
-        // Two plans over the warmed image: lowmem RAM plus IRAM.
-        drec_plan_init(&plow, cage.ram, 0, 0x10000u);
-        drec_plan_init(&piram, cage.iram, 0x809800u, 0x800u);
-        endpc = rrm->dsp->pc & 0xffffffu;
-        drec_plan_entry(&plow, endpc);
-        drec_plan_entry(&piram, endpc);
-        // Interrupts vector through the boot ROM pattern into IRAM.
-        for (v = 0; v < 12; v++)
-            drec_plan_entry(&piram, 0x809fc0u + (uint32_t)v);
-        drec_plan_run(&plow);
-        drec_plan_run(&piram);
-        // Snapshot the image plus the code mask for the guard.
-        dsp_snap_free();
-        dsp_snap_buf = (uint32_t *)malloc(0x10800u * 4);
-        dsp_mask_buf = (uint8_t *)malloc(0x10800u);
-        if (!dsp_snap_buf || !dsp_mask_buf) {
-            drec_plan_free(&plow);
-            drec_plan_free(&piram);
-            dsp_snap_free();
-            machine_reset();
-            return -1;
-        }
-        memcpy(dsp_snap_buf, cage.ram, 0x10000u * 4);
-        memcpy(dsp_snap_buf + 0x10000u, cage.iram, 0x800u * 4);
-        memcpy(dsp_mask_buf, plow.seen, 0x10000u);
-        memcpy(dsp_mask_buf + 0x10000u, piram.seen, 0x800u);
-        rrm->dsp_snap = dsp_snap_buf;
-        rrm->dsp_mask = dsp_mask_buf;
-        memset(rrm->dsp_bad, 0, sizeof(rrm->dsp_bad));
-        dsp_snap_save(dir);
         files[0] = 0;
-        for (chunk = 0; chunk < 5; chunk++) {
-            uint32_t covered;
-            snprintf(path, sizeof(path), "%s/rec_%d.c", dir, chunk);
-            f = fopen(path, "w");
-            if (!f) {
-                drec_plan_free(&plow);
-                drec_plan_free(&piram);
-                machine_reset();
-                return -1;
-            }
-            covered = drec_emit(f, chunk < 4 ? &plow : &piram,
-                    clo[chunk], chi[chunk], chunk);
-            fclose(f);
-            {
-                char one[32];
-                snprintf(one, sizeof(one), "rec_%d.c ", chunk);
-                if (strlen(files) + strlen(one) < sizeof(files) - 1)
-                    strcat(files, one);
-            }
-            if (covered) nchunks++;
-        }
-        snprintf(path, sizeof(path), "%s/exports.c", dir);
-        f = fopen(path, "w");
-        if (!f) {
-            drec_plan_free(&plow);
-            drec_plan_free(&piram);
-            machine_reset();
-            return -1;
-        }
-        fprintf(f, "// Generated by rec_build. Do not edit.\n");
-        fprintf(f, "#define REC_MODULE 1\n");
-        fprintf(f, "#include \"rec_abi.h\"\n");
-        fprintf(f, "rr_mem_t *rrm;\nconst rr_hostfns_t *rrfns;\n");
-        fprintf(f, "void rec_init_module(rr_mem_t *m, "
-                "const rr_hostfns_t *f) { rrm = m; rrfns = f; }\n");
-        for (chunk = 0; chunk < 5; chunk++)
-            fprintf(f, "rec_fn_t drec_chunk_%d_fn(void);\n", chunk);
-        fprintf(f, "static const rec_func_t chunks[] = {\n");
-        for (chunk = 0; chunk < 5; chunk++)
-            fprintf(f, "{drec_chunk_%d_fn(), 0x%xu, 0x%xu},\n", chunk,
-                    clo[chunk], chi[chunk]);
-        fprintf(f, "};\nstatic const uint32_t labels[] = {\n");
-        // Merged label set (both plans sort their starts).
-        {
-            int a = 0, b = 0, n = 0;
-            while (a < plow.nstarts || b < piram.nstarts) {
-                uint32_t s;
-                if (b >= piram.nstarts || (a < plow.nstarts &&
-                        plow.starts[a] < piram.starts[b]))
-                    s = plow.starts[a++];
-                else
-                    s = piram.starts[b++];
-                fprintf(f, "0x%xu,", s);
-                if ((n++ & 7) == 7) fprintf(f, "\n");
-            }
-            fprintf(f, "\n};\nconst rec_module_t rec_exported_dsp = "
-                    "{%d, 1, 5, %d, chunks, labels};\n",
-                    REC_ABI_VERSION, plow.nstarts + piram.nstarts);
-        }
-        fclose(f);
-        strcat(files, "exports.c ");
-        drec_plan_free(&plow);
-        drec_plan_free(&piram);
-        machine_reset();
-        if (nchunks == 0) return -1;
-        if (compile_module(dir, out, files)) return -1;
+        rc = drec_write(plan, dir, sym, files, sizeof(files));
+        free(plan->work);
+        free(plan);
+        if (rc || compile_module(dir, out, files)) return -1;
     }
     h = open_module(out, &mod, sym, 1);
     if (h && rec_use_dsp(mod, h) == 0) return 0;
@@ -568,178 +358,33 @@ int rec_build_dsp(const char *cache_dir) {
     return -1;
 }
 
-// Emit module sources for linked-in builds (game-derived output).
+// Emit sources for a linked-in build (`make recomp`): dir/m68k and dir/dsp,
+// each with the headers it needs. Game-derived output: never commit it.
 int rec_emit_linked(const char *dir) {
-    char sub[1024], path[1024], cmd[2048];
-    const char *need[4] = { "rec_abi.h", "m68k_core.h", "rec_gen.h",
-        "c31_core.h" };
-    int i, chunk, v;
+    char sub[1024], files[16384];
     rec_plan_t plan;
-    static const uint32_t clo[5] = { 0, 0x4000, 0x8000, 0xc000,
-        0x809800u };
-    static const uint32_t chi[5] = { 0x4000, 0x8000, 0xc000, 0x10000u,
-        0x80a000u };
-    mkdir_p(dir);
-    for (i = 0; i < 4; i++) {
-        int j;
-        snprintf(path, sizeof(path), "%s/%s", dir, need[i]);
-        for (j = 0; j < rr_hdr_count; j++) {
-            if (!strcmp(rr_hdr_names[j], need[i])) break;
-        }
-        if (j >= rr_hdr_count) return -1;
-        if (write_file(path, rr_hdr_data[j], strlen(rr_hdr_data[j])))
-            return -1;
-    }
+    drec_plan_t *dplan;
+    int rc;
     snprintf(sub, sizeof(sub), "%s/m68k", dir);
     mkdir_p(sub);
-    m68krec_plan_init(&plan, mach.rom, 0x200000u);
-    m68krec_plan_entry(&plan, rom32(mach.rom, 4) & 0xffffffu);
-    for (v = 2; v < 256; v++) {
-        uint32_t t = rom32(mach.rom, (uint32_t)v * 4);
-        if (t < 0x200000u && !(t & 1)) m68krec_plan_entry(&plan, t);
-    }
-    m68krec_plan_run(&plan);
-    for (chunk = 0; chunk < 32; chunk++) {
-        FILE *f;
-        snprintf(path, sizeof(path), "%s/rec_%02d.c", sub, chunk);
-        f = fopen(path, "w");
-        if (!f) {
-            m68krec_plan_free(&plan);
-            return -1;
-        }
-        m68krec_emit(f, &plan, (uint32_t)chunk << 16,
-                ((uint32_t)chunk << 16) + 0x10000u, chunk);
-        fclose(f);
-    }
-    snprintf(path, sizeof(path), "%s/rec_mod.c", sub);
-    {
-        FILE *mf = fopen(path, "w");
-        if (mf) {
-            int s;
-            fprintf(mf, "// Generated by rec_build. Do not edit.\n");
-            fprintf(mf, "#include \"../rec_abi.h\"\n");
-            for (chunk = 0; chunk < 32; chunk++)
-                fprintf(mf, "rec_fn_t rec_chunk_%d_fn(void);\n", chunk);
-            fprintf(mf, "static const rec_func_t chunks[] = {\n");
-            for (chunk = 0; chunk < 32; chunk++)
-                fprintf(mf, "{rec_chunk_%d_fn(), 0x%xu, 0x%xu},\n", chunk,
-                        chunk << 16, (chunk << 16) + 0x10000u);
-            fprintf(mf, "};\nstatic const uint32_t labels[] = {\n");
-            for (s = 0; s < plan.nstarts; s++) {
-                fprintf(mf, "0x%xu,", plan.starts[s]);
-                if ((s & 7) == 7) fprintf(mf, "\n");
-            }
-            fprintf(mf, "\n};\nconst rec_module_t rec_linked_m68k = "
-                    "{%d, 0, 32, %d, chunks, labels};\n", REC_ABI_VERSION,
-                    plan.nstarts);
-            fclose(mf);
-        }
-    }
+    if (write_headers(sub)) return -1;
+    files[0] = 0;
+    m68krec_plan(&plan, mach.rom, 0x200000u);
+    rc = m68krec_write(&plan, sub, "rec_linked_m68k", files, sizeof(files));
     m68krec_plan_free(&plan);
+    if (rc) return -1;
     snprintf(sub, sizeof(sub), "%s/dsp", dir);
     mkdir_p(sub);
-    dsp_warmup_run();
-    if (!dsp_warm_ok()) {
-        fprintf(stderr, "ragerecomp: DSP warmup failed to boot\n");
-        machine_reset();
+    if (write_headers(sub)) return -1;
+    dplan = (drec_plan_t *)calloc(1, sizeof(*dplan));
+    if (!dplan) return -1;
+    if (dsp_plan_warm(dplan)) {
+        free(dplan);
         return -1;
     }
-    {
-        drec_plan_t plow, piram;
-        uint32_t endpc;
-        int v;
-        FILE *sf;
-        drec_plan_init(&plow, cage.ram, 0, 0x10000u);
-        drec_plan_init(&piram, cage.iram, 0x809800u, 0x800u);
-        endpc = rrm->dsp->pc & 0xffffffu;
-        drec_plan_entry(&plow, endpc);
-        drec_plan_entry(&piram, endpc);
-        for (v = 0; v < 12; v++)
-            drec_plan_entry(&piram, 0x809fc0u + (uint32_t)v);
-        drec_plan_run(&plow);
-        drec_plan_run(&piram);
-        for (chunk = 0; chunk < 5; chunk++) {
-            FILE *f;
-            snprintf(path, sizeof(path), "%s/rec_%d.c", sub, chunk);
-            f = fopen(path, "w");
-            if (!f) {
-                drec_plan_free(&plow);
-                drec_plan_free(&piram);
-                machine_reset();
-                return -1;
-            }
-            drec_emit(f, chunk < 4 ? &plow : &piram, clo[chunk],
-                    chi[chunk], chunk);
-            fclose(f);
-        }
-        // Snapshot source for the translated-code guard.
-        snprintf(path, sizeof(path), "%s/rec_snap.c", sub);
-        sf = fopen(path, "w");
-        if (sf) {
-            uint32_t a;
-            fprintf(sf, "// Generated by rec_build. Do not edit.\n");
-            fprintf(sf, "#include \"../rec_abi.h\"\n");
-            fprintf(sf, "const uint32_t rec_linked_snap[0x10800u] = {\n");
-            for (a = 0; a < 0x10000u; a++) {
-                fprintf(sf, "0x%xu,", cage.ram[a]);
-                if ((a & 7) == 7) fprintf(sf, "\n");
-            }
-            for (a = 0; a < 0x800u; a++) {
-                fprintf(sf, "0x%xu,", cage.iram[a]);
-                if ((a & 7) == 7) fprintf(sf, "\n");
-            }
-            fprintf(sf, "\n};\nconst uint8_t rec_linked_mask[0x10800u] "
-                    "= {\n");
-            for (a = 0; a < 0x10000u; a++) {
-                fprintf(sf, "%u,", plow.seen[a] ? 1 : 0);
-                if ((a & 31) == 31) fprintf(sf, "\n");
-            }
-            for (a = 0; a < 0x800u; a++) {
-                fprintf(sf, "%u,", piram.seen[a] ? 1 : 0);
-                if ((a & 31) == 31) fprintf(sf, "\n");
-            }
-            fprintf(sf, "\n};\n");
-            fclose(sf);
-        }
-        snprintf(path, sizeof(path), "%s/rec_mod.c", sub);
-        sf = fopen(path, "w");
-        if (sf) {
-            int a = 0, b = 0, n = 0;
-            fprintf(sf, "// Generated by rec_build. Do not edit.\n");
-            fprintf(sf, "#include \"../rec_abi.h\"\n");
-            for (chunk = 0; chunk < 5; chunk++)
-                fprintf(sf, "rec_fn_t drec_chunk_%d_fn(void);\n", chunk);
-            fprintf(sf, "static const rec_func_t chunks[] = {\n");
-            for (chunk = 0; chunk < 5; chunk++)
-                fprintf(sf, "{drec_chunk_%d_fn(), 0x%xu, 0x%xu},\n",
-                        chunk, clo[chunk], chi[chunk]);
-            fprintf(sf, "};\nstatic const uint32_t labels[] = {\n");
-            while (a < plow.nstarts || b < piram.nstarts) {
-                uint32_t s;
-                if (b >= piram.nstarts || (a < plow.nstarts &&
-                        plow.starts[a] < piram.starts[b]))
-                    s = plow.starts[a++];
-                else
-                    s = piram.starts[b++];
-                fprintf(sf, "0x%xu,", s);
-                if ((n++ & 7) == 7) fprintf(sf, "\n");
-            }
-            fprintf(sf, "\n};\nconst rec_module_t rec_linked_dsp = "
-                    "{%d, 1, 5, %d, chunks, labels};\n", REC_ABI_VERSION,
-                    plow.nstarts + piram.nstarts);
-            fclose(sf);
-        }
-        drec_plan_free(&plow);
-        drec_plan_free(&piram);
-    }
-    machine_reset();
-    snprintf(cmd, sizeof(cmd),
-            "cd \"%s\" && for f in m68k/rec_*.c dsp/rec_*.c; do "
-            "sed 's#include \"rec_abi.h\"#include \"../rec_abi.h\"#; "
-            "s#include \"rec_gen.h\"#include \"../rec_gen.h\"#; "
-            "s#include \"m68k_core.h\"#include \"../m68k_core.h\"#; "
-            "s#include \"c31_core.h\"#include \"../c31_core.h\"#' "
-            "\"$f\" > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"; done",
-            dir);
-    return system(cmd);
+    files[0] = 0;
+    rc = drec_write(dplan, sub, "rec_linked_dsp", files, sizeof(files));
+    free(dplan->work);
+    free(dplan);
+    return rc;
 }

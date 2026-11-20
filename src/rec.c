@@ -5,6 +5,7 @@
 #include "c31_core.h"
 #include "cage.h"
 #include "rec_build.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -14,30 +15,79 @@ static void *handle_m68k = NULL;
 static void *handle_dsp = NULL;
 static int force_interp_m68k = 0;
 static int force_interp_dsp = 0;
+static void map68_build(const rec_module_t *m);
+static void mapdsp_build(const rec_module_t *m);
+
+// RR_INTERP_HIST=file: count where the interpreters still run while
+// translated code is active (missing entry points), written at shutdown.
+#define HIST_68K (0x200000u / 2)    // per ROM word
+#define HIST_DSP (0x10000u + 0x800u) // lowmem words, then IRAM
+static uint32_t *hist68, *histdsp;
+static uint64_t hist68_other, histdsp_other;
+
+static void hist_m68k(uint32_t pc) {
+    if (pc < 0x200000u) hist68[pc >> 1]++;
+    else hist68_other++;
+}
+
+static void hist_dsp(uint32_t pc) {
+    if (pc < 0x10000u) histdsp[pc]++;
+    else if (pc >= 0x809800u && pc < 0x80a000u)
+        histdsp[0x10000u + (pc - 0x809800u)]++;
+    else histdsp_other++;
+}
+
+static void hist_write(void) {
+    const char *name = getenv("RR_INTERP_HIST");
+    FILE *f;
+    uint32_t i;
+    uint64_t t68 = 0, tdsp = 0;
+    if (!name || !hist68) return;
+    f = fopen(name, "w");
+    if (!f) return;
+    for (i = 0; i < HIST_68K; i++) t68 += hist68[i];
+    for (i = 0; i < HIST_DSP; i++) tdsp += histdsp[i];
+    fprintf(f, "# 68k interp %llu (+%llu outside ROM) of %llu; "
+            "dsp interp %llu (+%llu outside RAM) of %llu\n",
+            (unsigned long long)t68, (unsigned long long)hist68_other,
+            (unsigned long long)rrm->cpu->total,
+            (unsigned long long)tdsp, (unsigned long long)histdsp_other,
+            (unsigned long long)rrm->dsp->total);
+    for (i = 0; i < HIST_68K; i++)
+        if (hist68[i]) fprintf(f, "m68k %06x %u\n", i * 2, hist68[i]);
+    for (i = 0; i < HIST_DSP; i++)
+        if (histdsp[i]) fprintf(f, "dsp %06x %u\n",
+                i < 0x10000u ? i : 0x809800u + (i - 0x10000u), histdsp[i]);
+    fclose(f);
+}
 
 void rec_init(void) {
+    if (getenv("RR_INTERP_HIST") && !hist68) {
+        hist68 = (uint32_t *)calloc(HIST_68K, sizeof(*hist68));
+        histdsp = (uint32_t *)calloc(HIST_DSP, sizeof(*histdsp));
+    }
     force_interp_m68k = getenv("RR_NOREC") && getenv("RR_NOREC")[0] != 0 &&
             strcmp(getenv("RR_NOREC"), "0") != 0;
     force_interp_dsp = getenv("RR_NODSP") && getenv("RR_NODSP")[0] != 0 &&
             strcmp(getenv("RR_NODSP"), "0") != 0;
     if (!force_interp_m68k && rec_linked_m68k.nlabels > 0 &&
-            rec_linked_m68k.abi == REC_ABI_VERSION)
+            rec_linked_m68k.abi == REC_ABI_VERSION) {
         mod_m68k = &rec_linked_m68k;
-    if (!force_interp_dsp && rec_linked_dsp.nlabels > 0 &&
-            rec_linked_dsp.abi == REC_ABI_VERSION) {
-        mod_dsp = &rec_linked_dsp;
-        rrm->dsp_snap = rec_linked_snap;
-        rrm->dsp_mask = rec_linked_mask;
-        memset(rrm->dsp_bad, 0, sizeof(rrm->dsp_bad));
+        map68_build(mod_m68k);
     }
+    if (!force_interp_dsp && rec_linked_dsp.nlabels > 0 &&
+            rec_linked_dsp.abi == REC_ABI_VERSION)
+        rec_use_dsp(&rec_linked_dsp, NULL);
 }
 
 void rec_shutdown(void) {
+    hist_write();
     // Handles are closed by rec_build (which opened them); just forget.
     if (handle_m68k) rec_close_handle(handle_m68k);
     if (handle_dsp) rec_close_handle(handle_dsp);
     handle_m68k = handle_dsp = NULL;
     mod_m68k = mod_dsp = NULL;
+    rrm->dsp_mask = NULL;
 }
 
 int rec_use_m68k(const rec_module_t *mod, void *handle) {
@@ -47,6 +97,7 @@ int rec_use_m68k(const rec_module_t *mod, void *handle) {
     if (handle_m68k) rec_close_handle(handle_m68k);
     mod_m68k = mod;
     handle_m68k = handle;
+    map68_build(mod);
     return 0;
 }
 
@@ -54,9 +105,13 @@ int rec_use_dsp(const rec_module_t *mod, void *handle) {
     if (!mod || mod->abi != REC_ABI_VERSION || mod->kind != 1 ||
             !mod->nlabels)
         return -1;
+    if (!mod->label_fn || !mod->image || !mod->mask) return -1;
     if (handle_dsp) rec_close_handle(handle_dsp);
     mod_dsp = mod;
     handle_dsp = handle;
+    mapdsp_build(mod);
+    rrm->dsp_mask = mod->mask;
+    rrm->dsp_gen++;
     return 0;
 }
 
@@ -68,44 +123,78 @@ int rec_have_dsp(void) {
     return !force_interp_dsp && mod_dsp && mod_dsp->nlabels > 0;
 }
 
-static int has_label(const rec_module_t *m, uint32_t pc) {
-    uint32_t lo = 0, hi = m->nlabels;
-    while (lo < hi) {
-        uint32_t mid = lo + (hi - lo) / 2;
-        if (m->labels[mid] == pc) return 1;
-        if (m->labels[mid] < pc) lo = mid + 1;
-        else hi = mid;
+// DSP entry map: drec_idx(pc) -> function index (-1 = interpret), plus
+// per function the dsp_gen at which it last matched (or failed to match)
+// the image it was translated from.
+static int32_t *mapdsp;
+static uint32_t *dsp_ok_gen, *dsp_bad_gen;
+
+static void mapdsp_build(const rec_module_t *m) {
+    uint32_t i;
+    free(mapdsp);
+    free(dsp_ok_gen);
+    free(dsp_bad_gen);
+    mapdsp = (int32_t *)malloc(DREC_WORDS * sizeof(*mapdsp));
+    dsp_ok_gen = (uint32_t *)calloc(m->nchunks, sizeof(*dsp_ok_gen));
+    dsp_bad_gen = (uint32_t *)calloc(m->nchunks, sizeof(*dsp_bad_gen));
+    if (!mapdsp || !dsp_ok_gen || !dsp_bad_gen) {
+        free(mapdsp);
+        mapdsp = NULL;
+        return;
     }
-    return 0;
-}
-
-static int find_chunk_idx(const rec_module_t *m, uint32_t pc) {
-    uint32_t lo = 0, hi = m->nchunks;
-    while (lo < hi) {
-        uint32_t mid = lo + (hi - lo) / 2;
-        if (pc < m->chunks[mid].lo) hi = mid;
-        else if (pc >= m->chunks[mid].hi) lo = mid + 1;
-        else return (int)mid;
+    for (i = 0; i < DREC_WORDS; i++) mapdsp[i] = -1;
+    for (i = 0; i < m->nlabels; i++) {
+        int k = drec_idx(m->labels[i]);
+        if (k >= 0 && m->label_fn[i] < m->nchunks)
+            mapdsp[k] = (int32_t)m->label_fn[i];
     }
-    return -1;
 }
 
-static rec_fn_t find_kchunk(const rec_module_t *m, uint32_t pc) {
-    int i = find_chunk_idx(m, pc);
-    return (i < 0) ? NULL : m->chunks[i].fn;
+// Does DSP memory (as fetched) still hold function f's code?
+static int dsp_func_ok(uint32_t f) {
+    const rec_func_t *fn = &mod_dsp->chunks[f];
+    uint32_t a;
+    uint32_t gen = rrm->dsp_gen;
+    if (dsp_ok_gen[f] == gen) return 1;
+    if (dsp_bad_gen[f] == gen) return 0;
+    for (a = fn->lo; a < fn->hi; a++) {
+        int i = drec_idx(a);
+        if (i < 0) break;
+        if (mod_dsp->mask[i] && rrfns->drd(a) != mod_dsp->image[i]) {
+            dsp_bad_gen[f] = gen;
+            return 0;
+        }
+    }
+    dsp_ok_gen[f] = gen;
+    return 1;
 }
 
-// DSP chunk entry, honouring the translated-code guard (a chunk whose
-// RAM changed runs on the interpreter instead).
-static rec_fn_t find_dchunk(const rec_module_t *m, uint32_t pc) {
-    int i = find_chunk_idx(m, pc);
-    uint32_t chunk;
-    if (i < 0) return NULL;
-    if (pc < 0x10000u) chunk = pc >> 14;
-    else if (pc >= 0x809800u && pc < 0x80a000u) chunk = 4;
-    else return NULL;
-    if (chunk < 8 && rrm->dsp_mask && rrm->dsp_bad[chunk]) return NULL;
-    return m->chunks[i].fn;
+static rec_fn_t dsp_lookup(uint32_t pc) {
+    int i = drec_idx(pc);
+    int32_t f;
+    if (i < 0 || !mapdsp || (f = mapdsp[i]) < 0) return NULL;
+    return dsp_func_ok((uint32_t)f) ? mod_dsp->chunks[f].fn : NULL;
+}
+
+// 68K entry map: ROM pc / 2 -> translated function (NULL = interpret).
+#define MAP68_SIZE (RR_ROM_SIZE / 2)
+static rec_fn_t *map68;
+
+static void map68_build(const rec_module_t *m) {
+    uint32_t i;
+    if (!map68) map68 = (rec_fn_t *)calloc(MAP68_SIZE, sizeof(*map68));
+    if (!map68) return;
+    memset(map68, 0, MAP68_SIZE * sizeof(*map68));
+    if (!m || !m->label_fn) return;
+    for (i = 0; i < m->nlabels; i++) {
+        uint32_t pc = m->labels[i];
+        if (pc < RR_ROM_SIZE && !(pc & 1) && m->label_fn[i] < m->nchunks)
+            map68[pc >> 1] = m->chunks[m->label_fn[i]].fn;
+    }
+}
+
+static rec_fn_t map68_get(uint32_t pc) {
+    return (pc < RR_ROM_SIZE && !(pc & 1) && map68) ? map68[pc >> 1] : NULL;
 }
 
 void rec_run_main(void) {
@@ -115,6 +204,7 @@ void rec_run_main(void) {
         return;
     }
     for (;;) {
+        rec_fn_t fn;
         if (c->cycles <= 0 || c->halted) return;
         if (c->stop) {
             uint32_t mask = (c->sr & M68K_SR_IMASK) >> 8;
@@ -133,89 +223,57 @@ void rec_run_main(void) {
             m68k_run();
             return;
         }
+        fn = map68_get(c->pc & 0xffffffu);
+        if (fn) {
+            // Translated code returns at block ends; the loop above takes
+            // pending exceptions and interrupts, as the interpreter does
+            // between instructions.
+            uint64_t before = c->total;
+            uint32_t pc0 = c->pc;
+            fn();
+            if (c->total != before || c->pc != pc0 || c->exc || c->stop)
+                continue;
+        }
+        // Not translated (or the function could not enter): interpret one
+        // instruction, then look again.
         {
-            uint32_t pc = c->pc & 0xffffffu;
-            rec_fn_t fn = NULL;
-            if (mod_m68k && has_label(mod_m68k, pc))
-                fn = find_kchunk(mod_m68k, pc);
-            if (fn) {
-                rr_rc_t rc = fn();
-                if (rc == RR_EXIT) return;
-                continue; // RR_JUMP / RR_CONT: re-dispatch
-            }
-            // Untranslated: interpret until translated code or slice end.
-            {
-                int guard = 1024;
-                while (c->cycles > 0 && guard-- > 0) {
-                    int st;
-                    uint32_t pc2 = c->pc & 0xffffffu;
-                    if (mod_m68k && has_label(mod_m68k, pc2)) break;
-                    st = m68k_step();
-                    if (st != 0) return;
-                    if (c->exc || c->stop) break;
-                }
-            }
+            int st;
+            if (hist68) hist_m68k(c->pc & 0xffffffu);
+            st = m68k_step();
+            if (st != 0) return;
         }
     }
 }
 
+// Mirrors c31_run: translated functions run whole steps (see DI in
+// c31_core.h), the interpreter covers the rest, so both give the same
+// result to the bit.
 void rec_run_dsp(void) {
     c31_t *d = rrm->dsp;
+    cage_slice_begin(d->cycles);
     if (!rec_have_dsp()) {
-        int budget = d->cycles;
-        cage_slice_begin(budget);
         c31_run();
-        cage_slice_end();
-        cage_update();
-        return;
-    }
-    {
-        int budget = d->cycles;
-        cage_slice_begin(budget);
+    } else {
         for (;;) {
+            rec_fn_t fn;
             if (d->cycles <= 0) break;
             if (d->idle) {
                 d_check_irqs(d);
                 if (d->idle) { d->cycles = 0; break; }
             }
-            // Repeat blocks loop back here (not from inside delay slots).
-            if (d->dcount < 0 && (d->st & C31_ST_RM) && d->pc == d->re + 1) {
-                if ((int32_t)--d->rc >= 0) d->pc = d->rs & 0xffffffu;
-                else {
-                    d->st &= ~C31_ST_RM;
-                    d->rpts_active = 0;
-                }
+            fn = dsp_lookup(d->pc & 0xffffffu);
+            if (fn) {
+                // Progress: instructions ran, or a repeat block looped
+                // back into another function.
+                uint64_t before = d->total;
+                uint32_t pc0 = d->pc;
+                fn();
+                if (d->total != before || d->pc != pc0 || d->idle) continue;
             }
-            d_check_irqs(d);
-            {
-                uint32_t pc = d->pc & 0xffffffu;
-                rec_fn_t fn = NULL;
-                // Translated code never runs mid-delay (delay sequences
-                // are atomic inside a chunk) or in a tripped chunk.
-                if (d->dcount < 0 && mod_dsp && has_label(mod_dsp, pc))
-                    fn = find_dchunk(mod_dsp, pc);
-                if (fn) {
-                    rr_rc_t rc = fn();
-                    if (rc == RR_EXIT) break;
-                    continue; // RR_JUMP / RR_CONT: re-dispatch
-                }
-                {
-                    int guard = 1024;
-                    while (d->cycles > 0 && guard-- > 0) {
-                        uint32_t pc2 = d->pc & 0xffffffu;
-                        if (d->dcount < 0 && mod_dsp &&
-                                has_label(mod_dsp, pc2)) break;
-                        if (c31_step()) {
-                            guard = 0;
-                            break;
-                        }
-                    }
-                    if (d->idle) { d->cycles = 0; break; }
-                }
-            }
+            if (histdsp) hist_dsp(d->pc & 0xffffffu);
+            if (c31_step()) { d->cycles = 0; break; }
         }
-        cage_slice_end();
-        cage_update();
-        (void)budget;
     }
+    cage_slice_end();
+    cage_update();
 }

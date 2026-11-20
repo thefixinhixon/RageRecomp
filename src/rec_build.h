@@ -3,7 +3,7 @@
 #pragma once
 
 // Bump when the generated C changes (part of the cache key).
-#define RECOMP_VERSION 1
+#define RECOMP_VERSION 6
 
 // Build (or load from cache) the 68K and DSP modules for the loaded
 // ROMs. The DSP build warms the image on the interpreter first.

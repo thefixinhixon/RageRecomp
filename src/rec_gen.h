@@ -11,8 +11,23 @@ static inline int rr_mpoll(void) {
     m68k_t *c = rrm->cpu;
     uint32_t mask = (c->sr & M68K_SR_IMASK) >> 8;
     return c->cycles <= 0 || c->exc || c->stop || c->irq > mask ||
-            c->irq == 7;
+            c->irq == 7 || (c->sr & (M68K_SR_T | M68K_SR_T0));
 }
+
+// One translated instruction, exactly as the interpreter's m68k_step runs
+// it: next pc, shared semantics, cycles. Then leave wherever the
+// interpreter would stop or take an exception before the next one (slice
+// over, fault, interrupt above the mask), so both stop at the same
+// instruction boundaries and give identical results.
+#define RR_I(PC, NPC, INS, CYC) do { \
+        c->pc = (NPC); \
+        rr_exec(c, &(INS), (PC)); \
+        c->cycles -= (CYC); \
+        c->total++; \
+        if (c->cycles <= 0 || c->exc || \
+                c->irq > ((c->sr >> 8) & 7u) || c->irq == 7) \
+            return RR_EXIT; \
+    } while (0)
 
 // Block epilogue: record the fallthrough pc, charge the block's cycles
 // and instruction count, and leave when the slice or machine needs it.

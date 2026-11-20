@@ -69,7 +69,7 @@ void machine_reset(void) {
     rrm->cpu = &mach.cpu;
     rrm->dsp = &mach.dsp;
     rrm->dsp_speedup = mach_profile ? mach_profile->dsp_speedup : 0xffffffffu;
-    memset(rrm->dsp_bad, 0, sizeof(rrm->dsp_bad));
+    rrm->dsp_gen++;    // DSP RAM is about to be reloaded
     mem_map_pages();
     cage_map_pages();
     mem_update_irq();
@@ -92,9 +92,12 @@ static void frame_budgets(uint32_t *k, uint32_t *d) {
     *d = (uint32_t)n;
 }
 
+static int log_lines;
+
 void machine_frame(void) {
     uint32_t fk, fd, line;
     frame_budgets(&fk, &fd);
+    log_lines = getenv("RR_LOG_FRAME") && atoi(getenv("RR_LOG_FRAME")) >= 2;
     if (getenv("RR_LOG_FRAME"))
         fprintf(stderr, "frame fk=%u fd=%u lines=%u\n", fk, fd,
                 GT_LINES);
@@ -121,6 +124,11 @@ void machine_frame(void) {
         cage_scanline_swap();
         rrm->cpu->cycles = (int32_t)(k1 - k0);
         rec_run_main();
+        if (log_lines)  // RR_LOG_FRAME=2: CPU position after every line
+            fprintf(stderr, "line %u 68k total %llu pc %06X sr %04X irq %u "
+                    "left %d\n", line, (unsigned long long)rrm->cpu->total,
+                    rrm->cpu->pc & 0xffffffu, rrm->cpu->sr, rrm->cpu->irq,
+                    rrm->cpu->cycles);
         if (!cage.dsp_held) {
             rrm->dsp->cycles = (int32_t)(d1 - d0);
             rec_run_dsp();
