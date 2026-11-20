@@ -1538,20 +1538,17 @@ static inline void d_exec_rest(c31_t *d, const d_insn_t *o) {
         }
         rr_drd(s); // acknowledge strobes unconnected on CAGE
         return;
+    // LDFcond/LDIcond leave the status flags alone (TI's C3x guide; MAME):
+    // code tests a compare, then loads 0 and 1 conditionally on it.
     case DOP_LDFC:
         if (!d_cond(d, o->cc)) return;
         d_gsrc_f(d, o, &d->r[o->dreg & 7]);
-        d_clr_nzvuf(d);
-        d_or_nzf(d, &d->r[o->dreg & 7]);
         return;
     case DOP_LDIC:
         if (!d_cond(d, o->cc)) return;
         s = d_gsrc_i(d, o, 1);
         d_setreg(d, o->dreg, s);
-        if (o->dreg < 8) {
-            d_clr_nzvuf(d);
-            d_or_nz(d, s);
-        } else if (o->dreg >= 19) d_special(d, o->dreg);
+        if (o->dreg >= 19) d_special(d, o->dreg);
         return;
     case DOP_ADDC3:
         {
@@ -1947,15 +1944,11 @@ static inline void d_exec_rest(c31_t *d, const d_insn_t *o) {
                 d->r[o->dreg & 7].man = (int32_t)mem;
                 d_int2float(d, &d->r[o->dreg & 7]);
                 break;
-            case DOP_LDF:
+            case DOP_LDF:       // LDF||STF, LDI||STI: flags unaffected
                 d->r[o->dreg & 7] = mf;
-                d_clr_nzvuf(d);
-                d_or_nzf(d, &d->r[o->dreg & 7]);
                 break;
             case DOP_LDI:
                 d->r[o->dreg & 7].man = (int32_t)mem;
-                d_clr_nzvuf(d);
-                d_or_nz(d, mem);
                 break;
             case DOP_LSH3:
                 d_lsh(d, o->dreg & 7, d_ireg(d, o->sreg & 7), mem);

@@ -99,6 +99,9 @@ static void frame_budgets(uint32_t *k, uint32_t *d) {
 
 static int log_lines;
 
+// A slice's overrun (negative cycles left), carried into the next slice.
+static int32_t overrun(int32_t left) { return left < 0 ? left : 0; }
+
 void machine_frame(void) {
     uint32_t fk, fd, line;
     frame_budgets(&fk, &fd);
@@ -134,7 +137,11 @@ run:
             mem_set_scanline(1);
         }
         cage_scanline_swap();
-        rrm->cpu->cycles = (int32_t)(k1 - k0);
+        // Each CPU gets the line's cycles less what it overran last time
+        // (MAME's scheduler carries the overrun the same way; the DSP's
+        // speedup burns 100 cycles at a time, so dropping it ran the sound
+        // board ~3% fast). Unused cycles (halted, stopped) are not banked.
+        rrm->cpu->cycles = (int32_t)(k1 - k0) + overrun(rrm->cpu->cycles);
         rec_run_main();
         if (log_lines)  // RR_LOG_FRAME=2: CPU position after every line
             fprintf(stderr, "line %u 68k total %llu pc %06X sr %04X irq %u "
@@ -142,7 +149,7 @@ run:
                     rrm->cpu->pc & 0xffffffu, rrm->cpu->sr, rrm->cpu->irq,
                     rrm->cpu->cycles);
         if (!cage.dsp_held) {
-            rrm->dsp->cycles = (int32_t)(d1 - d0);
+            rrm->dsp->cycles = (int32_t)(d1 - d0) + overrun(rrm->dsp->cycles);
             rec_run_dsp();
         }
         // Level-driven CAGE IRQ3, sampled every scanline.

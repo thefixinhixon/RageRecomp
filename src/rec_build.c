@@ -124,14 +124,17 @@ static uint64_t fnv(uint64_t h, const void *p, size_t n) {
 }
 
 // Everything the translated code depends on: the program ROM, what the
-// sound DSP boots from (boot loader, sound program ROMs), the translators
-// and the module interface.
+// sound DSP boots from (boot loader, sound program ROMs), the translators,
+// the module interface and the instruction semantics compiled into it (the
+// embedded headers), so a fix there rebuilds every cached module.
 static uint64_t build_key(void) {
-    int v[2] = { RECOMP_VERSION, REC_ABI_VERSION };
+    int v[2] = { RECOMP_VERSION, REC_ABI_VERSION }, i;
     uint64_t h = fnv(0xcbf29ce484222325ull, mach.rom, RR_ROM_SIZE);
     if (cage.boot) h = fnv(h, cage.boot, RR_DSP_BOOT_WORDS * 4);
     if (cage.srom) h = fnv(h, cage.srom, RR_DSP_ROM_WORDS * 4);
     if (cage.bootint) h = fnv(h, cage.bootint, 0x1000u * 4);
+    for (i = 0; i < rr_hdr_count; i++)
+        h = fnv(h, rr_hdr_data[i], strlen(rr_hdr_data[i]));
     return fnv(h, v, sizeof(v));
 }
 

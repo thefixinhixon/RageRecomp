@@ -231,6 +231,10 @@ tag builds them on GitHub Actions into a draft release.
 
 ## Status and known issues
 
+- Builds before this one played no music (effects and voices only): a
+  sound-processor instruction changed flags it shouldn't, which stalled
+  the music sequencer. The sound board also ran 3% fast. Both are fixed;
+  the first start after updating rebuilds the translated code.
 - Builds before this one wired the EEPROM to the wrong byte lane: the game
   read blank settings and nothing it wrote was kept (operator settings,
   statistics, high scores). Their `saves/*.eeprom` files are blank, so

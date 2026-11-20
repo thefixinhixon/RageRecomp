@@ -408,15 +408,18 @@ static void dump_at(int frame) {
     if (!l) return;
     list = strchr(l, ',') != NULL;
     for (q = l; *q; q = strchr(q, ',') ? strchr(q, ',') + 1 : q + strlen(q)) {
-        char n0[32] = "ram.bin", n1[32] = "bank.bin";
+        char n0[32] = "ram.bin", n1[32] = "bank.bin", n2[32] = "dsp.bin";
         FILE *o;
         if (atoi(q) != frame) continue;
         if (list) {
             snprintf(n0, sizeof(n0), "ram_%05d.bin", frame);
             snprintf(n1, sizeof(n1), "bank_%05d.bin", frame);
+            snprintf(n2, sizeof(n2), "dsp_%05d.bin", frame);
         }
         if ((o = fopen(n0, "wb"))) { fwrite(mach.ram, 1, RR_RAM_SIZE, o); fclose(o); }
         if ((o = fopen(n1, "wb"))) { fwrite(mach.bank, 1, RR_BANK_SIZE, o); fclose(o); }
+        // The sound DSP's RAM (64K words, host order).
+        if (cage.ram && (o = fopen(n2, "wb"))) { fwrite(cage.ram, 4, 0x10000, o); fclose(o); }
     }
 }
 

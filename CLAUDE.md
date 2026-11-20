@@ -81,6 +81,11 @@ The game's ROMs and code are copyrighted. This repo is public.
 - The C31 charges MAME's counts (1 base, +3 branches/calls/rets/RPTS,
   +4 trap). DSP DMA/timer periods are in DSP cycles off the same
   16.9344 MHz base as MAME's H1-derived attotime values; verified equal.
+- Each CPU's overrun past its scanline slice is carried into the next
+  slice, as MAME's scheduler does. The DSP speedup (writes to its idle
+  word burn 100 cycles) overruns by ~31 cycles a line; dropping that ran
+  the sound board 3% fast (music tempo and pitch). The DSP's 250 Hz tick
+  count now tracks MAME's to within a few ticks over 40 s.
 - Translated and interpreted runs are bit-identical: translated code runs
   each instruction exactly as the interpreter's step does (shared
   semantics, cycles, then a check for slice end, faults and interrupts;
@@ -130,6 +135,8 @@ The game's ROMs and code are copyrighted. This repo is public.
   an empty DSP half (the DSP stays on the interpreter) and the 68K is
   still translated. The boot ROM is in the cache key, so adding it later
   rebuilds with the DSP.
+- The cache key also hashes the embedded headers (instruction semantics),
+  so fixing an instruction rebuilds every player's cached module.
 - Translated DSP code runs only while DSP memory still holds the words it
   was translated from: a write changing a code word bumps `dsp_gen`, and
   the dispatcher re-checks each function against the module's image.
@@ -171,7 +178,7 @@ state hash:
     tools/regress.sh PROGRAM SET [RUN_DIR] [WORK_DIR]
 
 The hash is the same for translated and interpreted runs, for every
-compiler and for linked-in code; current value (primrage, STATE_FORMAT 6): `9b37a456086b84d1`. The state no longer folds in the
+compiler and for linked-in code; current value (primrage, STATE_FORMAT 7): `ad20192391a76fb5`. The state no longer folds in the
 translator version (translated = interpreted), and leaves out the DAC
 output queue (host audio, not emulated state), so playing or recording
 sound doesn't change it. Rewind, run-ahead and netplay rollback
@@ -192,7 +199,8 @@ Useful environment variables:
 - `RR_VIRTUAL_PADS="Name,?Name"`: attach SDL virtual gamepads (testing).
 - `RR_NO_GL=1`: the SDL renderer instead of OpenGL. `RR_CONSOLE=1`: on
   Windows, keep the log on the console instead of `ragerecomp.log`.
-- As UltraCombo's `KI2_*`: `RR_DUMP_AT=F[,F...]` (RAM dumps), `RR_POKE=
+- As UltraCombo's `KI2_*`: `RR_DUMP_AT=F[,F...]` (RAM dumps: 68K RAM,
+  bank, and the sound DSP's 64K-word RAM as `dsp_NNNNN.bin`), `RR_POKE=
   F:ADDR:VAL`, `RR_WAV`, `RR_SPEED`, `RR_HISTORY`, `RR_RESET_TEST=N` (a
   reset after N frames must equal a fresh power-on), `RR_DESYNC_AT`
   (netplay), `RR_DUMP_ON_EXC`, `RR_COVER` (interpreter coverage),
@@ -239,14 +247,21 @@ read with `getenv` in `src/` (grep them for details).
   interpreted instructions in each.
 - CAGE DSP interpreter + translator: complete C31 ISA incl. parallel
   ops, delay slots, DMA/timers/serial/host comm; float ALU verified
-  bit-identical to MAME's integer model on probed vectors. The translator
+  bit-identical to MAME's integer model on probed vectors. LDIcond/LDFcond
+  and LDI||STI/LDF||STF leave the flags alone (TI's guide, MAME); until
+  STATE_FORMAT 7 they set them, which stalled the music sequencer
+  (`$2833`: CMPI, LDIU 0, LDIGE 1), so no music played. The translator
   finds 13,143 instructions (RAM, IRAM and the boot ROM's routines); zero
   interpreted instructions in the same run.
 - Parity: translated, partly translated and fully interpreted runs give
   the same regression hash; so do gcc, clang, Zig and TinyCC modules,
   TinyCC under Wine, and the linked-in build.
-- GT video, CAGE audio path (music and effects play; the opening attract
-  is quiet in MAME too), protection, EEPROM (persisted per set): from MAME.
+- GT video, CAGE audio path, protection, EEPROM (persisted per set): from
+  MAME. Music and effects checked against MAME 0.289 (flatpak; its DSP
+  boot set is named `tms320c31.zip`) on a scripted coin-up: same command
+  stream from the 68K, same music cues and timing, similar levels. The
+  attract is silent in both: the operator setting "attract volume"
+  defaults to mute.
   The EEPROM sits on the even byte lane (MAME's `umask32(0xff00ff00)`);
   until STATE_FORMAT 6 it was on the odd one, so the game read zeros
   (which pass its check) and its writes were lost.
@@ -271,17 +286,18 @@ read with `getenv` in `src/` (grep them for details).
   bitmask (Jan only).
 - Verified: rewind-and-replay and 2-frame run-ahead match the plain run;
   netplay between two processes (40 +-15 ms, 5% loss) and two windows
-  stays in sync; reset after play equals a fresh power-on; training
+  stays in sync; reset after play equals a fresh power-on apart from what
+  the game itself wrote to its EEPROM; training
   refills health and holds the clock; auto-coin starts a game; save/load
   round-trips; controller-label test passes (93 checks).
 - Game versions: all three played to a fight (primrageo/primrage20 start
   with button 1), each with zero interpreted instructions and translated
   = interpreted hashes over the scripted 3600 frames (`--script` as in
-  regress.sh; primrageo `bf975e06b10ef47a`, primrage20 `b658df2228342ef1`
-  at STATE_FORMAT 6). Switching versions
+  regress.sh; primrageo `b0ab9b8bacc13b49`, primrage20 `dca54d1ea0e945bb`
+  at STATE_FORMAT 7). Switching versions
   in the menu restarts the program on the new set. ROM files are found by
   name with the right CRC, else by CRC (merged sets), else by name.
-- Verified: 282 unit tests pass on Linux and under Wine; Linux + Windows
+- Verified: 287 unit tests pass on Linux and under Wine; Linux + Windows
   builds clean; `make packages` built and the AppImage (Zig, 83 s first
   launch) and Windows zip (under Wine, TinyCC) both start and play.
 - CI and release workflows written but never executed on GitHub Actions.

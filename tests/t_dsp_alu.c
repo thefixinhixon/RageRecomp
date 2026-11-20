@@ -129,6 +129,37 @@ int main(void) {
         T_OK(d->r[4].man == (int32_t)0x2A000000u,
                 "fix to AR4 leaves R4 float alone");
     }
+    {
+        // The music sequencer's wait test ($2833): CMPI 0,R0 / LDIU 0,R0 /
+        // LDIGE 1,R0. Conditional loads leave the flags alone, so with R0
+        // negative the LDIGE is not taken and R0 ends 0 (next event due).
+        // When LDIU set Z, R0 became 1 and the music never advanced.
+        c31_t *d = rrm->dsp;
+        poke(0x1120, 0x04E00000u);  // CMPI  $0000,R0
+        poke(0x1121, 0x50600000u);  // LDIU  $0000,R0
+        poke(0x1122, 0x55600001u);  // LDIGE $0001,R0
+        poke(0x1123, 0x40600000u);  // LDFU  $0000,R0
+        d->pc = 0x1120;
+        d->dcount = -1;
+        d->st = 0;
+        d->ie = 0;
+        d->iff = 0;
+        d->irq = 0;
+        d->cycles = 1000000;
+        d->r[0].man = -5;
+        d->r[0].exp = 0;
+        c31_step();
+        T_OK((peek_st() & C31_ST_N) != 0, "cmpi negative sets N");
+        c31_step();
+        T_OK(d->r[0].man == 0, "ldiu loads");
+        T_OK((peek_st() & (C31_ST_N | C31_ST_Z)) == C31_ST_N,
+                "ldiu leaves the flags alone");
+        c31_step();
+        T_OK(d->r[0].man == 0, "ldige not taken after a negative compare");
+        c31_step();
+        T_OK((peek_st() & (C31_ST_N | C31_ST_Z)) == C31_ST_N,
+                "ldfu leaves the flags alone");
+    }
     printf("# %d tests, %d failures\n", t_count, t_failures);
     return t_failures != 0;
 }
