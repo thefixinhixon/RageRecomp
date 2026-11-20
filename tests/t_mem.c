@@ -95,5 +95,19 @@ int main(void) {
     T_EQ_U32(rr_mrd16(0x80b360u, 0), 0u, "hole reads zero");
     T_EQ_U32(mem_mrd32(0xc00004u), 0u, "gap reads zero");
 
+    // 020: misaligned word/long data accesses are legal (the fight
+    // entry code copies structs with odd move.w EAs); only odd
+    // instruction fetches raise address error.
+    t_w32(0xff1240u, 0x01020304u);
+    T_EQ_U32(rr_mrd16(0xff1241u, 0), 0x0203u, "odd word read composes");
+    T_EQ_U32(rr_mrd32(0xff1241u, 0), 0x02030400u, "odd long read composes");
+    T_EQ_U32(c->exc, 0u, "odd reads raise no exception");
+    rr_mwr16(0xff1241u, 0xa5b6, 0);
+    T_EQ_U32(t_r32(0xff1240u), 0x01a5b604u, "odd word write stores");
+    rr_mwr32(0xff1241u, 0x11223344u, 0);
+    T_EQ_U32(t_r32(0xff1240u), 0x01112233u, "odd long write head");
+    T_EQ_U32(rr_mrd8(0xff1244u), 0x44u, "odd long write tail");
+    T_EQ_U32(c->exc, 0u, "odd writes raise no exception");
+
     return test_finish();
 }

@@ -118,7 +118,10 @@ static inline uint32_t rr_mrd8(uint32_t a) {
 
 static inline uint32_t rr_mrd16(uint32_t a, uint32_t pc) {
     a &= 0xffffffu;
-    if (a & 1) { rr_aerr(pc, a, 1, 2); return 0; }
+    // 020: misaligned data reads are legal (two bus cycles), so
+    // compose odd words from bytes; only odd fetches fault.
+    if (a & 1) return (rr_mrd8(a) << 8) | rr_mrd8(a + 1);
+    (void)pc;
     uint8_t *p = rrm->mrd[a >> 16];
     if (p) {
         uint32_t o = a & 0xffffu;
@@ -129,7 +132,11 @@ static inline uint32_t rr_mrd16(uint32_t a, uint32_t pc) {
 
 static inline uint32_t rr_mrd32(uint32_t a, uint32_t pc) {
     a &= 0xffffffu;
-    if (a & 1) { rr_aerr(pc, a, 1, 0); return 0; }
+    // 020: misaligned data reads are legal; compose odd longs.
+    if (a & 1)
+        return (rr_mrd8(a) << 24) | (rr_mrd8(a + 1) << 16) |
+                (rr_mrd8(a + 2) << 8) | rr_mrd8(a + 3);
+    (void)pc;
     uint8_t *p = rrm->mrd[a >> 16];
     if (p) {
         uint32_t o = a & 0xffffu;
@@ -173,7 +180,13 @@ static inline void rr_mwr8(uint32_t a, uint32_t v) {
 
 static inline void rr_mwr16(uint32_t a, uint32_t v, uint32_t pc) {
     a &= 0xffffffu;
-    if (a & 1) { rr_aerr(pc, a, 0, 2); return; }
+    // 020: misaligned data writes are legal (two bus cycles).
+    if (a & 1) {
+        rr_watch_addr(a, v, 2, pc);
+        rr_mwr8(a, v >> 8);
+        rr_mwr8(a + 1, v);
+        return;
+    }
     rr_watch_addr(a, v, 2, pc);
     uint8_t *p = rrm->mwr[a >> 16];
     if (p) {
@@ -184,7 +197,15 @@ static inline void rr_mwr16(uint32_t a, uint32_t v, uint32_t pc) {
 
 static inline void rr_mwr32(uint32_t a, uint32_t v, uint32_t pc) {
     a &= 0xffffffu;
-    if (a & 1) { rr_aerr(pc, a, 0, 0); return; }
+    // 020: misaligned data writes are legal; store byte-wise.
+    if (a & 1) {
+        rr_watch_addr(a, v, 4, pc);
+        rr_mwr8(a, v >> 24);
+        rr_mwr8(a + 1, v >> 16);
+        rr_mwr8(a + 2, v >> 8);
+        rr_mwr8(a + 3, v);
+        return;
+    }
     rr_watch_addr(a, v, 4, pc);
     uint8_t *p = rrm->mwr[a >> 16];
     if (p) {
