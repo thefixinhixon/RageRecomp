@@ -11,7 +11,7 @@
 #include <stddef.h>
 
 // Bump when the generated C changes (part of the cache key).
-#define RECOMP_VERSION 7
+#define RECOMP_VERSION 8
 
 // Progress for a "preparing" screen: stage text and 0..1.
 typedef void (*rec_progress_fn)(const char *stage, double fraction);

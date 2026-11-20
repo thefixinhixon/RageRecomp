@@ -122,6 +122,10 @@ The game's ROMs and code are copyrighted. This repo is public.
   pointer candidates (operands, every long in ROM / word in DSP RAM) that
   decode plausibly. Guesses may overlap; the emitters jump explicitly
   wherever the next emitted instruction is not the real successor.
+- Without tms32031.zip the sound program can't boot: the module then has
+  an empty DSP half (the DSP stays on the interpreter) and the 68K is
+  still translated. The boot ROM is in the cache key, so adding it later
+  rebuilds with the DSP.
 - Translated DSP code runs only while DSP memory still holds the words it
   was translated from: a write changing a code word bumps `dsp_gen`, and
   the dispatcher re-checks each function against the module's image.
@@ -162,7 +166,7 @@ state hash:
 
 The hash is the same for translated and interpreted runs, for every
 compiler and for linked-in code; current value (primrage, RECOMP_VERSION
-7, STATE_FORMAT 3): `7a3e83d2c7c36469`. The state's compatibility id
+8, STATE_FORMAT 3): `923d56bc94ec65d2`. The state's compatibility id
 folds in RECOMP_VERSION, so a translator change moves the hash even when
 emulation is unchanged: compare instruction totals (`RR_INTERP_HIST`) too.
 Useful environment variables:
@@ -236,7 +240,7 @@ read with `getenv` in `src/` (grep them for details).
 - Game versions: all three played to a fight (primrageo/primrage20 start
   with button 1), each with zero interpreted instructions and translated
   = interpreted hashes over the scripted 3600 frames (primrageo
-  `302bde79d30ae50d`, primrage20 `439057198c79a5a5`). Switching versions
+  `302bde79d30ae50d`, primrage20 `439057198c79a5a5` at RECOMP_VERSION 7). Switching versions
   in the menu restarts the program on the new set. ROM files are found by
   name with the right CRC, else by CRC (merged sets), else by name.
 - Verified: 244 unit tests pass on Linux and under Wine; Linux + Windows

@@ -79,7 +79,8 @@ static int use_module(void *(*get)(void *, const char *), void *h,
         return 0;
     }
     init(rrm, rrfns);
-    if (rec_use_m68k(m) || rec_use_dsp(d)) {
+    // a DSP half with nothing in it: the sound program wasn't there to read
+    if (rec_use_m68k(m) || (d->nlabels && rec_use_dsp(d))) {
         snprintf(err, errlen, "module from another version");
         return 0;
     }
@@ -670,20 +671,37 @@ static int dsp_plan_warm(drec_plan_t *plan) {
 
 // Write both CPUs' sources into dir and their file names into files;
 // m68k and dsp name the exported modules.
+// An empty DSP half: the sound program couldn't be booted (no tms32031.zip),
+// so the DSP stays on the interpreter while the 68K is still translated.
+static int write_empty_dsp(const char *dir, const char *dsp, char *files, size_t cap) {
+    char path[4400], text[512];
+    snprintf(path, sizeof(path), "%s/dexports.c", dir);
+    snprintf(text, sizeof(text), "// No sound program was read: nothing translated.\n"
+            "#define REC_MODULE 1\n#include \"rec_abi.h\"\n"
+            "const rec_module_t %s = {%d, 1, 0, 0, 0, 0, 0, 0, 0};\n",
+            dsp, REC_ABI_VERSION);
+    if (!write_text(path, text)) return -1;
+    if (strlen(files) + 12 < cap) strcat(files, "dexports.c ");
+    return 0;
+}
+
 static int translate(const char *dir, const char *m68k, const char *dsp,
         char *files, size_t cap) {
     rec_plan_t plan;
-    drec_plan_t *dplan;
+    drec_plan_t *dplan = NULL;
     int rc;
     files[0] = 0;
-    if (!cage.srom || !cage.boot || !cage.bootint) return -1;
     progress("Reading the sound program", 0.02);
-    dplan = (drec_plan_t *)calloc(1, sizeof(*dplan));
-    if (!dplan) return -1;
-    if (dsp_plan_warm(dplan)) {
-        free(dplan);
-        return -1;
+    if (cage.srom && cage.boot && cage.bootint) {
+        dplan = (drec_plan_t *)calloc(1, sizeof(*dplan));
+        if (!dplan) return -1;
+        if (dsp_plan_warm(dplan)) {
+            free(dplan);
+            dplan = NULL;
+        }
     }
+    if (!dplan) fprintf(stderr, "rec: no sound program to translate; the DSP "
+            "runs on the interpreter\n");
     progress("Translating the game's code", 0.08);
     m68krec_plan(&plan, mach.rom, RR_ROM_SIZE);
     fprintf(stderr, "rec: 68K code %u instructions below %06X, %u functions "
@@ -692,9 +710,12 @@ static int translate(const char *dir, const char *m68k, const char *dsp,
     rc = m68krec_write(&plan, dir, m68k, files, cap);
     m68krec_plan_free(&plan);
     progress("Translating the sound code", 0.25);
-    if (!rc) rc = drec_write(dplan, dir, dsp, files, cap);
-    free(dplan->work);
-    free(dplan);
+    if (!rc) rc = dplan ? drec_write(dplan, dir, dsp, files, cap) :
+            write_empty_dsp(dir, dsp, files, cap);
+    if (dplan) {
+        free(dplan->work);
+        free(dplan);
+    }
     return rc;
 }
 

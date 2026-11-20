@@ -19,8 +19,9 @@ made from the game" discipline.
 - A PC running 64-bit Windows 10+ or Linux (glibc 2.29+), with OpenGL 2.1+.
 - Your own MAME files, as zips, the way MAME keeps them:
   - `primrage.zip`: Primal Rage version 2.3 (Jan 1995), MAME's parent set;
-  - `tms32031.zip`: the TMS320C31 boot ROM (`c31boot.bin`); the sound DSP
-    needs it, and without it the game runs silent;
+  - `tms32031.zip`: the TMS320C31 boot ROM (`c31boot.bin`), a MAME device
+    set of its own, not inside `primrage.zip` even when merged; the sound
+    DSP needs it, and without it the game runs silent;
   - optionally `primrageo.zip` (2.3, Dec 1994) and `primrage20.zip` (2.0),
     which take their shared graphics and sound from `primrage.zip`. A
     merged `primrage.zip` holding all three works too: as in MAME, files
