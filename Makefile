@@ -84,7 +84,10 @@ endif
 
 .PHONY: all tests windows clean recomp FORCE pkg-check package-linux package-appimage package-windows packages shaders-extra shaders-lola
 
+# The menu lists presets from shaders/ beside the program: link the source
+# tree's into the build folder so a dev build sees them (extras included).
 all: $(OUTDIR)/ragerecomp-headless$(EXE) $(if $(filter yes,$(HAVE_SDL)),$(OUTDIR)/ragerecomp$(EXE))
+	@[ -e $(OUTDIR)/shaders ] || ln -s $(CURDIR)/shaders $(OUTDIR)/shaders
 	@echo "build done in $(OUTDIR)/"
 
 $(OUTDIR)/gen/rec_headers.c $(OUTDIR)/gen/rec_headers.h: tools/embed.py $(wildcard src/*.h)
@@ -158,6 +161,7 @@ windows:
 	    SDL_LIBS="-L$(WIN_SDL)/lib -lmingw32 -lSDL2main -lSDL2 -mwindows -static-libgcc" \
 	    build-win/ragerecomp-headless.exe $(if $(WIN_SDL),build-win/ragerecomp.exe) \
 	    $(addprefix build-win/,$(addsuffix .exe,$(TESTS)))
+	@[ -e build-win/shaders ] || ln -s $(CURDIR)/shaders build-win/shaders
 
 # ---------------------------------------------------------------- packages
 # Release packages, without game files or game code (tools/package.sh).

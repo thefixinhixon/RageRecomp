@@ -356,7 +356,8 @@ smooth, scanlines, CRT) and every libretro `.glslp` preset under
 Parameters are adjustable in the menu and saved. Any other libretro GLSL
 preset works too: put it, with the files it uses, under `shaders/`. Built
 from source, `make shaders-extra` fetches the GPL ones from
-libretro/glsl-shaders (`make packages` does it for you).
+libretro/glsl-shaders (`make packages` does it for you), and `make`
+links `shaders/` into the build folder so `build-lnx/ragerecomp` lists them.
 
 ## Files and folders
 

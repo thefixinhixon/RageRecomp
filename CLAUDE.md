@@ -179,6 +179,10 @@ Build and run (needs gcc, SDL2, python3; game files in `run/`):
     make recomp ROMS=run # developer build with the game code linked in (never share it)
     build-lnx/ragerecomp
 
+`make` links `shaders/` into `build-lnx/` (and `make windows` into
+`build-win/`): the menu only lists presets in a `shaders/` folder beside
+the program.
+
 Regression test: a fixed 3600-frame boot, coin-up and fight, printing a
 state hash:
 
