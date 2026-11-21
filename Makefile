@@ -181,14 +181,21 @@ build-pkg/ragerecomp: $(PKG_SRCS) src/*.h $(OUTDIR)/gen/rec_headers.c $(OUTDIR)/
 	    $(PKG_SRCS) $(OUTDIR)/gen/rec_headers.c $(OUTDIR)/gen/version.c \
 	    $(LNX_SDL) -Wl,-rpath,'$$ORIGIN/lib' -lm -ldl
 
+# Release file names: the version, the system and the processor (as
+# RecompLauncher picks a player's file by them).
+PKG_BASE = dist/RageRecomp-v$(RR_VERSION)
+PKG_LINUX = $(PKG_BASE)-Linux-x64.tar.xz
+PKG_APPIMAGE = $(PKG_BASE)-Linux-x64.AppImage
+PKG_WINDOWS = $(PKG_BASE)-Windows-x64.zip
+
 package-linux: build-pkg/ragerecomp
-	sh tools/package.sh linux build-pkg/ragerecomp $(LNX_SDL)
-	tar -C dist -cJf dist/RageRecomp-Linux.tar.xz RageRecomp-Linux
+	RR_VERSION=$(RR_VERSION) sh tools/package.sh linux build-pkg/ragerecomp $(LNX_SDL)
+	rm -f $(PKG_LINUX) && tar -C dist -cJf $(PKG_LINUX) RageRecomp-Linux
 
 # AppImage's runtime: github.com/AppImage/type2-runtime (static, needs no libfuse2)
 APPIMAGE_RUNTIME ?= deps/dl/appimage-runtime/runtime-x86_64
 package-appimage: package-linux
-	sh tools/package.sh appimage $(APPIMAGE_RUNTIME)
+	APPIMAGE=$(PKG_APPIMAGE) sh tools/package.sh appimage $(APPIMAGE_RUNTIME)
 
 # Windows: the icon is drawn by the program itself (no game art); any build
 # of it for this machine writes the .ico.
@@ -203,8 +210,8 @@ build-win/ragerecomp-res.o: src/ragerecomp.rc build-win/ragerecomp.ico $(OUTDIR)
 
 package-windows: build-win/ragerecomp-res.o
 	$(MAKE) windows RES_OBJ=build-win/ragerecomp-res.o
-	sh tools/package.sh windows build-win/ragerecomp.exe $(WIN_SDL)/bin/SDL2.dll
-	cd dist && rm -f RageRecomp-Windows.zip && zip -qr9 RageRecomp-Windows.zip RageRecomp-Windows
+	RR_VERSION=$(RR_VERSION) sh tools/package.sh windows build-win/ragerecomp.exe $(WIN_SDL)/bin/SDL2.dll
+	rm -f $(PKG_WINDOWS) && cd dist && zip -qr9 $(notdir $(PKG_WINDOWS)) RageRecomp-Windows
 
 packages: package-appimage package-windows
 

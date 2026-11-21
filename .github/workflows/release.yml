@@ -65,10 +65,10 @@ jobs:
         with:
           name: RageRecomp-packages
           path: |
-            dist/RageRecomp-Windows.zip
-            dist/RageRecomp-Linux.tar.xz
-            dist/RageRecomp-x86_64.AppImage
-            dist/RageRecomp-x86_64.AppImage.zsync
+            dist/RageRecomp-v*-Windows-x64.zip
+            dist/RageRecomp-v*-Linux-x64.tar.xz
+            dist/RageRecomp-v*-Linux-x64.AppImage
+            dist/RageRecomp-v*-Linux-x64.AppImage.zsync
 
       - name: Draft a release with the packages
         if: startsWith(github.ref, 'refs/tags/v')
@@ -76,7 +76,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          files="dist/RageRecomp-Windows.zip dist/RageRecomp-Linux.tar.xz dist/RageRecomp-x86_64.AppImage dist/RageRecomp-x86_64.AppImage.zsync"
+          files=$(ls dist/RageRecomp-v*-Windows-x64.zip dist/RageRecomp-v*-Linux-x64.tar.xz \
+                     dist/RageRecomp-v*-Linux-x64.AppImage dist/RageRecomp-v*-Linux-x64.AppImage.zsync)
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" $files --clobber     # a release made by hand for this tag
           else

@@ -5,9 +5,12 @@
 #
 #   tools/package.sh linux    PROGRAM libSDL2-2.0.so.0 -> dist/RageRecomp-Linux/
 #   tools/package.sh windows  PROGRAM SDL2.dll         -> dist/RageRecomp-Windows/
-#   tools/package.sh appimage RUNTIME                  -> dist/RageRecomp-x86_64.AppImage
+#   tools/package.sh appimage RUNTIME                  -> $APPIMAGE
 #     (from dist/RageRecomp-Linux; RUNTIME is AppImage's type2-runtime)
 #     and its .zsync, which goes in the release beside it
+# RR_VERSION (the release's version) goes in recomplauncher.json's
+# prepare.version, so RecompLauncher sets the game up again for each
+# release (the step builds the game code).
 set -e
 target=$1 prog=$2
 sdl_licence=deps/sdl2-lnx/SDL2-2.32.10/LICENSE.txt
@@ -16,7 +19,7 @@ linux)   out=dist/RageRecomp-Linux   zig=deps/zig-linux   tcc=deps/tcc-lnx231 ex
 windows) out=dist/RageRecomp-Windows zig=deps/zig-windows tcc=deps/tcc-win    exe=RageRecomp.exe ;;
 appimage)
     # an AppImage is the runtime followed by a squashfs of the program's folder
-    app=dist/RageRecomp.AppDir image=dist/RageRecomp-x86_64.AppImage
+    app=dist/RageRecomp.AppDir image=${APPIMAGE:-dist/RageRecomp-x86_64.AppImage}
     rm -rf "$app" "$image"
     cp -r dist/RageRecomp-Linux "$app"
     rm -rf "$app/run"                   # game files go beside the AppImage
@@ -29,7 +32,7 @@ appimage)
     mksquashfs "$app" dist/appimage.sqfs -root-owned -noappend -quiet -comp zstd -Xcompression-level 19 -b 1M
     # update information for AppImageUpdate, in the runtime's .upd_info
     # section: the newest GitHub release and the .zsync published beside it
-    upd="gh-releases-zsync|thefixinhixon|RageRecomp|latest-all|RageRecomp-x86_64.AppImage.zsync"
+    upd="gh-releases-zsync|thefixinhixon|RageRecomp|latest-all|RageRecomp-*-Linux-x64.AppImage.zsync"
     cp "$prog" dist/runtime.tmp
     set -- $(readelf -SW dist/runtime.tmp | sed -n 's/.*\] \.upd_info *[A-Z]* *[0-9a-f]* \([0-9a-f]*\) \([0-9a-f]*\).*/\1 \2/p')
     [ $# = 2 ] && [ ${#upd} -lt $((0x$2)) ] || { echo "no room for update information in $prog" >&2; exit 1; }
@@ -37,7 +40,8 @@ appimage)
     cat dist/runtime.tmp dist/appimage.sqfs > "$image"
     chmod +x "$image"
     rm -f dist/appimage.sqfs dist/runtime.tmp
-    (cd dist && rm -f RageRecomp-x86_64.AppImage.zsync && "$zsyncmake" -u RageRecomp-x86_64.AppImage RageRecomp-x86_64.AppImage)
+    name=$(basename "$image")
+    (cd "$(dirname "$image")" && rm -f "$name.zsync" && "$zsyncmake" -u "$name" "$name")
     echo "packaged $image ($(du -h "$image" | cut -f1)) and its .zsync"
     exit 0 ;;
 *) echo "usage: $0 linux|windows|appimage ..." >&2; exit 1 ;;
@@ -47,7 +51,8 @@ rm -rf "$out"
 mkdir -p "$out/run" "$out/tools/zig/lib" "$out/tools/tcc" "$out/licenses"
 cp "$prog" "$out/$exe"
 cp README.md NOTICE "$out/"
-cp recomplauncher.json "$out/"         # RecompLauncher reads it from the top of the release zip
+# RecompLauncher reads it from the top of the release zip
+sed "s/\"version\": \"dev\"/\"version\": \"${RR_VERSION:-dev}\"/" recomplauncher.json > "$out/recomplauncher.json"
 cp LICENSE "$out/licenses/RageRecomp-LICENSE.txt"
 cp tools/dist-readme.txt "$out/READ-ME-FIRST.txt"
 cp tools/run-readme.txt "$out/run/PUT-GAME-FILES-HERE.txt"

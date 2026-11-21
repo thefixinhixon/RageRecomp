@@ -9,7 +9,7 @@ no game code) is included here.
    MAME's zips as they are, no unpacking needed.
 2. Start the program (RageRecomp.exe on Windows, ./ragerecomp on Linux).
 
-AppImage (Linux): make a folder named "run" beside RageRecomp-x86_64.AppImage
+AppImage (Linux): make a folder named "run" beside the .AppImage file
 and put the game files in it; settings and the cache then go beside the
 AppImage too. Without that folder, use ~/.local/share/RageRecomp/run/.
 

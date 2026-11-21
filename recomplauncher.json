@@ -2,24 +2,224 @@
   "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
   "format": 1,
   "name": "RageRecomp",
+  "repo": "thefixinhixon/RageRecomp",
   "game": {
-    "kind": "folder",
-    "label": "Your MAME ROM folder with primrage.zip (Primal Rage 2.3) and tms32031.zip (needed for sound).",
-    "check": {
-      "file": "primrage.zip"
-    }
-  },
-  "start": {
-    "program": [
-      "RageRecomp.exe",
-      "ragerecomp"
-    ],
-    "args": [
-      "--roms",
-      "{game}"
+    "kind": "iso_or_folder",
+    "label": "Your MAME set of Primal Rage: primrage.zip (version 2.3, Jan 1995), or the folder holding it. Keep tms32031.zip (newer MAME: tms320c31.zip) beside it for sound; primrageo.zip and primrage20.zip there add the older versions. .7z sets work too.",
+    "check": { "file": "primrage.zip" },
+    "dumps": [
+      { "name": "MAME merged set (TorrentZip)", "size": 29743358, "crc32": "83ff8613" }
     ]
   },
+  "start": {
+    "program": ["RageRecomp.exe", "ragerecomp", "RageRecomp.AppImage"],
+    "args": ["--data-dir", "{install}", "{game}"]
+  },
+  "prepare": {
+    "program": ["RageRecomp.exe", "ragerecomp", "RageRecomp.AppImage"],
+    "args": ["--prepare", "--data-dir", "{install}", "{game}"],
+    "label": "Building the game code for this PC (each version in your set) and the cabinet's first boot",
+    "timeout": 1800,
+    "version": "dev"
+  },
+  "config": [
+    { "id": "main", "format": "ini", "file": [{ "path": "{install}/ragerecomp.ini" }] }
+  ],
+  "saves": ["{install}/saves"],
+  "folders": {
+    "saves": [{ "path": "{install}/saves" }],
+    "logs": [{ "path": "{install}" }],
+    "screenshots": [{ "path": "{install}/screenshots" }],
+    "data": [{ "path": "{install}" }]
+  },
+  "actions": [
+    { "id": "saves", "label": "Saves", "help": "The cabinet's settings and high scores (one .eeprom per version) and your save states.", "open": "saves" },
+    { "id": "screenshots", "label": "Screenshots", "open": "screenshots" },
+    { "id": "rebuild", "label": "Rebuild the game code", "help": "Deletes the game code built for this PC; it's built again on the next start.", "clear": "data/cache" }
+  ],
   "exit_codes": {
-    "1": "It couldn't start. Make sure the ROM folder holds primrage.zip (and tms32031.zip for sound)."
-  }
+    "1": "RageRecomp couldn't start: it says why in its message and in ragerecomp.log. Most often Primal Rage's MAME files are missing or different.",
+    "3": "Primal Rage's MAME files weren't found. Pick the folder with primrage.zip, or the zip itself, on the game's page."
+  },
+  "system": {
+    "windows": { "version": "10", "graphics": { "opengl": "2.1" } },
+    "linux": { "glibc": "2.31", "graphics": { "opengl": "2.1" } }
+  },
+  "looks": { "graphics": "opengl" },
+  "groups": [
+    { "id": "Video" },
+    { "id": "Game" },
+    { "id": "Arcade settings" },
+    { "id": "Controls" }
+  ],
+  "settings": [
+    {
+      "id": "window", "label": "Window", "group": "Video",
+      "help": "Fullscreen fills the screen; Big Picture mode always starts fullscreen.",
+      "choices": [
+        { "label": "Windowed", "set": { "video/fullscreen": "no" } },
+        { "label": "Fullscreen", "set": { "video/fullscreen": "yes" } }
+      ],
+      "defaults": { "video/fullscreen": "no" }
+    },
+    {
+      "id": "picture", "label": "Picture", "group": "Video",
+      "help": "How the arcade's 336x240 picture is drawn: crisp pixels, a CRT look, or a pixel-art upscaler.",
+      "choices": [
+        { "label": "Sharp pixels", "set": { "video/filter": "sharp", "video/shader": "" } },
+        { "label": "Smooth", "set": { "video/filter": "smooth", "video/shader": "" } },
+        { "label": "Scanlines", "set": { "video/filter": "scanlines", "video/shader": "" } },
+        { "label": "CRT", "set": { "video/filter": "crt", "video/shader": "" } },
+        { "label": "CRT-Lottes", "set": { "video/shader": "shaders/crt/crt-lottes.glslp" } },
+        { "label": "CRT-Hyllian", "set": { "video/shader": "shaders/crt/crt-hyllian.glslp" } },
+        { "label": "Arcade 15 kHz", "set": { "video/shader": "shaders/lola-retro/arcade-15khz.glslp" } },
+        { "label": "xBR", "set": { "video/shader": "shaders/xbr/xbr-lv3.glslp" } },
+        { "label": "ScaleFX", "set": { "video/shader": "shaders/scalefx/scalefx.glslp" } }
+      ],
+      "defaults": { "video/filter": "sharp", "video/shader": "" }
+    },
+    {
+      "id": "scale", "label": "Scaling", "group": "Video",
+      "help": "Fit keeps the arcade's 4:3 shape as large as it goes; whole multiples keep every line the same height.",
+      "choices": [
+        { "label": "Fit (4:3)", "set": { "video/scale": "fit" } },
+        { "label": "Whole multiples", "set": { "video/scale": "integer" } },
+        { "label": "Stretch", "set": { "video/scale": "stretch" } }
+      ],
+      "defaults": { "video/scale": "fit" }
+    },
+    {
+      "id": "pacing", "label": "Frame pacing", "group": "Video", "advanced": true,
+      "help": "V-Sync is smooth on a 60 Hz screen (the game runs 0.1% fast); arcade timing keeps its own 59.92 Hz.",
+      "choices": [
+        { "label": "Automatic", "set": { "video/pacing": "auto" } },
+        { "label": "V-Sync", "set": { "video/pacing": "vsync" } },
+        { "label": "Arcade timing", "set": { "video/pacing": "audio" } }
+      ],
+      "defaults": { "video/pacing": "auto" }
+    },
+    {
+      "id": "version", "label": "Game version", "group": "Game",
+      "help": "Which release of the arcade game plays. Each needs its own MAME set (a merged primrage.zip has all three).",
+      "choices": [
+        { "label": "2.3 (Jan 1995)", "set": { "game/version": "primrage" } },
+        { "label": "2.3 (Dec 1994)", "set": { "game/version": "primrageo" } },
+        { "label": "2.0", "set": { "game/version": "primrage20" } }
+      ],
+      "defaults": { "game/version": "primrage" }
+    },
+    {
+      "id": "volume", "label": "Volume", "group": "Game",
+      "help": "The program's own volume.",
+      "slider": { "min": 0, "max": 100, "step": 5, "key": "audio/volume", "format": "%g" },
+      "defaults": { "audio/volume": "100" }
+    },
+    {
+      "id": "boot", "label": "Boot tests", "group": "Game",
+      "help": "The arcade board's own start-up tests, or straight to the attract.",
+      "choices": [
+        { "label": "Play them", "set": { "system/boot_skip_frames": "0" } },
+        { "label": "Skip them", "set": { "system/boot_skip_frames": "300" } }
+      ],
+      "defaults": { "system/boot_skip_frames": "0" }
+    },
+    {
+      "id": "auto_coin", "label": "Auto-coin", "group": "Game",
+      "help": "Start drops in the coins a credit needs, then starts.",
+      "choices": [
+        { "label": "On", "set": { "system/auto_coin": "yes" } },
+        { "label": "Off", "set": { "system/auto_coin": "no" } }
+      ],
+      "defaults": { "system/auto_coin": "yes" }
+    },
+    {
+      "id": "run_ahead", "label": "Run-ahead", "group": "Game",
+      "help": "Shows your input a frame or two sooner. Off is how the arcade played.",
+      "choices": [
+        { "label": "Off", "set": { "system/run_ahead": "0" } },
+        { "label": "1 frame", "set": { "system/run_ahead": "1" } },
+        { "label": "2 frames", "set": { "system/run_ahead": "2" } }
+      ],
+      "defaults": { "system/run_ahead": "0" }
+    },
+    {
+      "id": "rewind", "label": "Rewind", "group": "Game", "advanced": true,
+      "help": "Keeps a history to rewind through (hold Backspace).",
+      "choices": [
+        { "label": "On", "set": { "system/rewind": "yes" } },
+        { "label": "Off", "set": { "system/rewind": "no" } }
+      ],
+      "defaults": { "system/rewind": "yes" }
+    },
+    {
+      "id": "difficulty", "label": "Difficulty", "group": "Arcade settings", "in": "args",
+      "help": "The cabinet's difficulty, 1 (easiest) to 16; the game's default is 7. Kept in the cabinet's settings.",
+      "slider": { "min": 1, "max": 16, "step": 1, "format": "%g", "args": ["--operator", "difficulty={value}"] }
+    },
+    {
+      "id": "round_time", "label": "Round time", "group": "Arcade settings", "in": "args",
+      "help": "Seconds per round, 30 to 80; the game's default is 55.",
+      "slider": { "min": 30, "max": 80, "step": 5, "format": "%g", "args": ["--operator", "round_time={value}"] }
+    },
+    {
+      "id": "free_play", "label": "Free play", "group": "Arcade settings", "in": "args",
+      "help": "Start plays without coins. Game's setting leaves it as the game's test menu has it.",
+      "choices": [
+        { "label": "Game's setting", "args": [] },
+        { "label": "Off", "args": ["--operator", "free_play=0"] },
+        { "label": "On", "args": ["--operator", "free_play=1"] }
+      ]
+    },
+    {
+      "id": "coinage", "label": "Coinage", "group": "Arcade settings", "in": "args",
+      "help": "Coins per credit; the game's default is 2.",
+      "choices": [
+        { "label": "Game's setting", "args": [] },
+        { "label": "1 coin", "args": ["--operator", "game_cost=1"] },
+        { "label": "2 coins", "args": ["--operator", "game_cost=2"] },
+        { "label": "3 coins", "args": ["--operator", "game_cost=3"] },
+        { "label": "4 coins", "args": ["--operator", "game_cost=4"] }
+      ]
+    },
+    {
+      "id": "blood", "label": "Blood", "group": "Arcade settings", "in": "args",
+      "help": "Full gore, as the game ships, or none.",
+      "choices": [
+        { "label": "Game's setting", "args": [] },
+        { "label": "Full gore", "args": ["--operator", "gore=0"] },
+        { "label": "No gore", "args": ["--operator", "gore=1"] }
+      ]
+    },
+    {
+      "id": "attract_sound", "label": "Attract sound", "group": "Arcade settings", "in": "args",
+      "help": "Sound while the game shows its attract between games; the game ships it muted.",
+      "choices": [
+        { "label": "Game's setting", "args": [] },
+        { "label": "Mute", "args": ["--operator", "attract_sound=0"] },
+        { "label": "1/3 volume", "args": ["--operator", "attract_sound=1"] },
+        { "label": "2/3 volume", "args": ["--operator", "attract_sound=2"] },
+        { "label": "Full volume", "args": ["--operator", "attract_sound=3"] }
+      ]
+    },
+    {
+      "id": "rumble", "label": "Rumble", "group": "Controls",
+      "help": "Your controller vibrates when your fighter is hit.",
+      "choices": [
+        { "label": "On", "set": { "gamepad/rumble": "yes" } },
+        { "label": "Off", "set": { "gamepad/rumble": "no" } }
+      ],
+      "defaults": { "gamepad/rumble": "yes" }
+    },
+    {
+      "id": "labels", "label": "Button labels", "group": "Controls",
+      "help": "The button names shown in the menus; Automatic follows the controller.",
+      "choices": [
+        { "label": "Automatic", "set": { "gamepad/p1_labels": "auto", "gamepad/p2_labels": "auto" } },
+        { "label": "Xbox", "set": { "gamepad/p1_labels": "xbox", "gamepad/p2_labels": "xbox" } },
+        { "label": "PlayStation", "set": { "gamepad/p1_labels": "playstation", "gamepad/p2_labels": "playstation" } },
+        { "label": "Nintendo Switch", "set": { "gamepad/p1_labels": "switch", "gamepad/p2_labels": "switch" } }
+      ],
+      "defaults": { "gamepad/p1_labels": "auto", "gamepad/p2_labels": "auto" }
+    }
+  ]
 }

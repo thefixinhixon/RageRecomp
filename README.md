@@ -119,6 +119,25 @@ discount, language, game volume, statistics, tests) is in the game's own test
 menu: hold F2. "Reset game" power-cycles the cabinet and keeps the EEPROM,
 as the real board does.
 
+## RecompLauncher
+
+[RecompLauncher](https://recomplauncher.com) installs, sets up and starts
+RageRecomp (full setup, its level 3), from `recomplauncher.json` in each
+release:
+
+- You give it your `primrage.zip` (or `.7z`), or the folder holding it;
+  the merged TorrentZip set gets the "verified" badge.
+- Its setup step (`--prepare`) builds the game code for every version in
+  your set and does each cabinet's first boot, without a window, so the
+  first Play starts at once and the game's operator settings can be
+  changed from the start.
+- The game's page shows the main settings (window, picture and shaders,
+  scaling, game version, volume, boot tests, auto-coin, run-ahead, rumble,
+  button labels) and the arcade's own (difficulty, round time, free play,
+  coinage, blood, attract sound: "Game's setting" leaves the test menu's).
+- Everything stays in the game's folder (`--data-dir`): settings, saves
+  (backed up by the launcher), screenshots, the log for crash reports.
+
 ## Menu and settings
 
 The menu has save states, Graphics (fullscreen, display mode, window size,
@@ -195,6 +214,8 @@ ragerecomp [options] [PATH]
   --roms DIR           folder holding the zips
   --game-version SET   primrage, primrageo or primrage20
   --data-dir DIR       keep everything the program writes in DIR
+  --operator SPEC      the game's operator settings, e.g. difficulty=8,free_play=1
+  --prepare            set up without a window: build the game code, first boot
   --fullscreen, --windowed, --set SECTION.KEY=VALUE
   --version, --help
 ```
@@ -230,10 +251,11 @@ from your own ROMs: never share it.
 
 `tools/fetch-deps.sh` fills `deps/` from pinned, checksummed downloads
 (Zig, SDL2 built against glibc 2.31 and for MinGW, TinyCC, AppImage's
-runtime). Then `make packages` builds `dist/RageRecomp-Windows.zip`,
-`dist/RageRecomp-Linux.tar.xz` and `dist/RageRecomp-x86_64.AppImage` (with
-its `.zsync`). They contain no game files and no game code. Pushing a version
-tag builds them on GitHub Actions into a draft release.
+runtime). Then `make packages` builds `dist/RageRecomp-vVERSION-Windows-x64.zip`,
+`-Linux-x64.tar.xz` and `-Linux-x64.AppImage` (with its `.zsync`), named
+by version, system and processor as RecompLauncher expects. They contain no
+game files and no game code. Pushing a version tag builds them on GitHub
+Actions into a draft release.
 
 ## Status and known issues
 

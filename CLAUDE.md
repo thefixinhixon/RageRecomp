@@ -154,9 +154,14 @@ The game's ROMs and code are copyrighted. This repo is public.
   cabinet's EEPROM: the menu edits them there the way the game's test menu
   stores them (`adjust.c`), held until the next power-on; not in the ini.
   The rest stays in the game's test mode (the test-switch hotkey, F2).
-  `recomplauncher.json` (shipped in the packages) shows some of them in
-  RecompLauncher: change it too when one of those is renamed or its values
-  change.
+  `recomplauncher.json` (shipped in the packages; RecompLauncher level 3)
+  shows ini settings (`Section/Key`) and the operator settings (as
+  `--operator` arguments) in RecompLauncher: change it too when one of
+  those is renamed or its values change, and check it against
+  https://recomplauncher.com/schema/recomplauncher.json. Its `prepare`
+  step is `--prepare` (no window; `progress F TEXT` lines on stdout; one
+  child process per version present; exit 3 = no game files);
+  `package.sh` puts the release version in `prepare.version`.
 - Writable files go in `data_dir()`: `--data-dir` if given, else beside
   the program if that's writable, else the user data folder `RageRecomp`.
   Nothing is written anywhere else.
@@ -215,7 +220,7 @@ Useful environment variables:
 
 Packages (no game files, no game code):
 
-    make packages        # dist/RageRecomp-Windows.zip, -Linux.tar.xz, -x86_64.AppImage (+ .zsync)
+    make packages        # dist/RageRecomp-vVER-Windows-x64.zip, -Linux-x64.tar.xz, -Linux-x64.AppImage (+ .zsync)
 
 Pushing a version tag builds them on GitHub Actions
 (`.github/workflows/release.yml`) into a draft release.

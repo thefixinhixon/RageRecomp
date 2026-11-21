@@ -14,6 +14,8 @@
 #include <process.h>
 #else
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #endif
 
 #include "app.h"
@@ -47,6 +49,13 @@
 
 static const char *roms_dir;        // --roms or the [game] roms setting
 static int headless_mode;
+// RecompLauncher's setup step (--prepare): no window, progress on stdout.
+// The parent runs one child per game version (--prepare-version), each
+// covering its share (--prepare-span) of the progress bar.
+static int prepare_mode;
+static const char *prepare_set;
+static double prep_lo = 0.0, prep_hi = 1.0;
+#define EXIT_NO_GAME_FILES 3
 
 static void usage(void) {
     printf("usage: ragerecomp [options] [PATH]\n"
@@ -59,6 +68,12 @@ static void usage(void) {
            "                  .7z sets work too)\n"
            "  --game-version SET  primrage (2.3, Jan 1995, default), primrageo\n"
            "                  (2.3, Dec 1994) or primrage20 (2.0)\n"
+           "  --operator SPEC the game's operator settings, before it starts, e.g.\n"
+           "                  difficulty=8,round_time=60,free_play=1,game_cost=2,\n"
+           "                  gore=0,attract_sound=3 (needs a set-up EEPROM)\n"
+           "  --prepare       set up without a window (RecompLauncher's setup step):\n"
+           "                  build the game code for every version there is and\n"
+           "                  do each cabinet's first boot; prints progress lines\n"
            "  --data-dir DIR  keep settings, saves, states, screenshots and the\n"
            "                  built game code in DIR (made if needed); DIR/run is\n"
            "                  searched for the game files\n"
@@ -690,12 +705,160 @@ static int option_values(const char *a, const char *next) {
     static const char *const one[] = { "--roms", "--game-version", "--data-dir", "--set",
         "--headless", "--frames", "--script", "--shot", "--wav", "--load", "--nvram",
         "--emit-linked", "--shot-every", "--rewind-test", "--runahead", "--trace-from",
-        "--net-host", "--net-join", "--net-delay", "--net-fps", "--net-sim", "--join", NULL };
+        "--net-host", "--net-join", "--net-delay", "--net-fps", "--net-sim", "--join",
+        "--operator", "--prepare-version", "--prepare-span", NULL };
     int i;
     for (i = 0; one[i]; i++)
         if (!strcmp(a, one[i])) return 1;
     if (!strcmp(a, "--save-at") || !strcmp(a, "--dis")) return 2;
     if (!strcmp(a, "--host")) return next && next[0] != '-';     // the port is optional
+    return 0;
+}
+
+/* ---------------------------------------------------------------- */
+/* RecompLauncher's setup step                                      */
+/* ---------------------------------------------------------------- */
+
+// "progress F TEXT" on stdout, as the launcher's setup screen reads it.
+static void prep_line(double f, const char *text) {
+    static double last = -1;
+    static char last_text[256];
+    double g = prep_lo + (prep_hi - prep_lo) * (f < 0 ? 0 : f > 1 ? 1 : f);
+    // only when the text changes or the bar moves a percent (the compiler
+    // reports every file)
+    if (!strcmp(text, last_text) && g - last < 0.01 && g < 1) return;
+    last = g;
+    snprintf(last_text, sizeof(last_text), "%s", text);
+    printf("progress %.3f %s\n", g, text);
+    fflush(stdout);
+}
+
+static void prep_build_progress(const char *stage, double f) {
+    char t[256];
+    snprintf(t, sizeof(t), "%s (%s)", stage, prof ? prof->title : PRODUCT);
+    prep_line(f * 0.85, t);
+}
+
+// Run this program again with extra arguments and wait for it.
+static int run_self(const char *const *extra) {
+    const char *args[96];
+    int n = 0, i;
+    for (i = 0; i < main_argc && n < 80; i++) args[n++] = main_argv[i];
+    for (i = 0; extra[i] && n < 95; i++) args[n++] = extra[i];
+    args[n] = NULL;
+#ifdef _WIN32
+    {
+        // _spawnv joins the arguments with spaces: quote them (paths)
+        static char quoted[96][4400];
+        const char *qa[96];
+        char exe[4096];
+        for (i = 0; i < n; i++) {
+            const char *s = args[i];
+            char *d = quoted[i];
+            size_t k = 0, bs = 0;
+            d[k++] = '"';
+            for (; *s && k < sizeof(quoted[i]) - 4; s++) {
+                if (*s == '\\') { bs++; d[k++] = '\\'; continue; }
+                if (*s == '"') { while (bs--) d[k++] = '\\'; d[k++] = '\\'; }
+                bs = 0;
+                d[k++] = *s;
+            }
+            while (bs-- && k < sizeof(quoted[i]) - 2) d[k++] = '\\';
+            d[k++] = '"';
+            d[k] = 0;
+            qa[i] = d;
+        }
+        qa[n] = NULL;
+        GetModuleFileNameA(NULL, exe, sizeof(exe));
+        fflush(stdout);
+        return (int)_spawnv(_P_WAIT, exe, qa);
+    }
+#else
+    {
+        char exe[4096];
+        ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+        pid_t pid;
+        int st = 0;
+        exe[len > 0 ? len : 0] = 0;
+        fflush(stdout);
+        pid = fork();
+        if (pid == 0) {
+            execv(len > 0 ? exe : main_argv[0], (char *const *)args);
+            _exit(127);
+        }
+        if (pid < 0 || waitpid(pid, &st, 0) < 0) return 1;
+        return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
+    }
+#endif
+}
+
+// The setup step: every game version whose files are there, the one that
+// will be played first leading, each built in a child process.
+static int prepare_all(const char *first) {
+    int order[GAME_COUNT], n = 0, i, k, rc = 0;
+    const game_profile_t *f = first ? game_by_set(first) : NULL;
+    char marker[4400];
+    FILE *mf;
+    if (f && app_set_there(f->id)) order[n++] = (int)f->id;
+    for (i = 0; i < GAME_COUNT; i++)
+        if ((!f || i != (int)f->id) && app_set_there((game_id_t)i)) order[n++] = i;
+    if (!n) {
+        prep_line(0, "Primal Rage's MAME files (primrage.zip) were not found in your copy");
+        fprintf(stderr, "No game files found: primrage.zip (MAME's Primal Rage set) is needed.\n");
+        return EXIT_NO_GAME_FILES;
+    }
+    for (k = 0; k < n; k++) {
+        char span[64];
+        const char *extra[6];
+        snprintf(span, sizeof(span), "%.4f,%.4f", (double)k / n, (double)(k + 1) / n);
+        extra[0] = "--prepare-version";
+        extra[1] = game_profile((game_id_t)order[k])->set;
+        extra[2] = "--prepare-span";
+        extra[3] = span;
+        extra[4] = NULL;
+        rc = run_self(extra);
+        if (rc && k == 0) return rc;        // the version played first must work
+        if (rc) fprintf(stderr, "%s: setup failed (%d); it is set up when first played\n",
+                game_profile((game_id_t)order[k])->set, rc);
+    }
+    snprintf(marker, sizeof(marker), "%scache", data_dir());
+    make_dir(marker);
+    snprintf(marker, sizeof(marker), "%scache/prepared.txt", data_dir());
+    if ((mf = fopen(marker, "w"))) {
+        fprintf(mf, "%s %s: game code built for", PRODUCT, rr_version);
+        for (k = 0; k < n; k++) fprintf(mf, " %s", game_profile((game_id_t)order[k])->set);
+        fprintf(mf, "\n");
+        fclose(mf);
+    }
+    prep_line(1, "Ready to play");
+    return 0;
+}
+
+// One version (a child of prepare_all): its translated code, and the
+// EEPROM's first-boot setup so its operator settings can be changed.
+static int prepare_one(void) {
+    char msg[512];
+    int i;
+    prep_line(0, prof->title);
+    if (!rec_build_load_cached(msg, sizeof(msg)) && !rec_build(prep_build_progress, msg, sizeof(msg)))
+        fprintf(stderr, "rec: %s\n", msg);     // still playable, on the interpreters
+    else
+        fprintf(stderr, "rec: %s\n", msg);
+    machine_reset();
+    if (adjust_get(ADJ_DIFFICULTY) < 0) {
+        // a blank EEPROM: the game writes its defaults during its first boot
+        mach.in.b0 = mach.in.b1 = mach.in.b3 = 0xff;
+        for (i = 1; i <= 1600; i++) {
+            machine_frame();
+            if (i % 200 == 0) {
+                char t[256];
+                snprintf(t, sizeof(t), "First boot of the cabinet (%s)", prof->title);
+                prep_line(0.85 + 0.15 * i / 1600.0, t);
+            }
+        }
+        app_nvram_save();
+    }
+    prep_line(1, prof->title);
     return 0;
 }
 
@@ -706,6 +869,8 @@ int main(int argc, char **argv) {
     int frames = -1, want_hash = 0, save_at = 0, i;
     int shot_every = 0, rewind_test = 0, runahead = 0, trace_from = 0, dis_count = 0;
     const char *net_host = NULL, *net_join = NULL;
+    const char *operator_specs[16];
+    int n_operator = 0;
     int net_delay = 2, net_fps = 60, net_lat = 0, net_jit = 0, net_loss = 0;
     uint32_t dis_addr = 0;
 #ifdef RR_SDL
@@ -735,6 +900,7 @@ int main(int argc, char **argv) {
         if ((!strcmp(argv[i], "--headless") || !strcmp(argv[i], "--frames") ||
                 !strcmp(argv[i], "--emit-linked") || !strcmp(argv[i], "--dis")) && i + 1 < argc)
             headless_mode = 1;
+        if (!strcmp(argv[i], "--prepare")) prepare_mode = headless_mode = 1;
         if (argv[i][0] != '-' && !launch_path) launch_path = argv[i];
         i += option_values(argv[i], i + 1 < argc ? argv[i + 1] : NULL);
     }
@@ -747,11 +913,18 @@ int main(int argc, char **argv) {
             app_report(true, "%s", err);
             return 1;
         }
-        if (launch_set()) want_set = launch_set();
+        // a clone's zip names its version; primrage.zip (often a merged
+        // set holding all three) leaves the configured one
+        if (launch_set() && strcmp(launch_set(), "primrage")) want_set = launch_set();
     }
-#if defined(_WIN32) && defined(RR_SDL)
+#ifdef RR_SDL
+#ifdef _WIN32
     if (!headless_mode && !getenv("RR_CONSOLE")) {
-        // a GUI program has no console: keep the log in the data folder
+#else
+    if (!headless_mode && getenv("RECOMPLAUNCHER") && !getenv("RR_CONSOLE")) {
+#endif
+        // a GUI program has no console (and a launcher shows none): keep
+        // the log in the data folder, where crash reports pick it up
         static char log[4400];
         snprintf(log, sizeof(log), "%sragerecomp.log", data_dir());
         if (freopen(log, "w", stderr)) setvbuf(stderr, NULL, _IONBF, 0);
@@ -792,6 +965,14 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--wav") && i + 1 < argc) wav = argv[++i];
         else if (!strcmp(argv[i], "--hash")) want_hash = 1;
         else if (!strcmp(argv[i], "--sdl")) {}    // older launchers: the window is the default
+        else if (!strcmp(argv[i], "--prepare")) {}
+        else if (!strcmp(argv[i], "--prepare-version") && i + 1 < argc) prepare_set = want_set = argv[++i];
+        else if (!strcmp(argv[i], "--prepare-span") && i + 1 < argc)
+            sscanf(argv[++i], "%lf,%lf", &prep_lo, &prep_hi);
+        else if (!strcmp(argv[i], "--operator") && i + 1 < argc) {
+            if (n_operator < 16) operator_specs[n_operator++] = argv[i + 1];
+            i++;
+        }
         else if (!strcmp(argv[i], "--load") && i + 1 < argc) load_path = argv[++i];
         else if (!strcmp(argv[i], "--nvram") && i + 1 < argc) nvram_given = argv[++i];
         else if (!strcmp(argv[i], "--emit-linked") && i + 1 < argc) emit_dir = argv[++i];
@@ -841,6 +1022,7 @@ int main(int argc, char **argv) {
         }
     }
     if (headless_mode && frames < 0) frames = 600;
+    if (prepare_mode && !prepare_set) return prepare_all(want_set);
 
     // The game version: the one asked for, else the first one there is.
     prof = want_set ? game_by_set(want_set) : NULL;
@@ -873,14 +1055,14 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr, "playing %s (%s)\n", prof->title, prof->set);
     mach_profile = prof;
-    if (load_set(prof)) return 1;
+    if (load_set(prof)) return prepare_mode ? EXIT_NO_GAME_FILES : 1;
     gtvid_decode();
     gtvid_mo_init();
 
     // The cabinet's EEPROM: blank for headless runs (reproducible) unless
     // one is given, else the player's own for this version.
     if (nvram_given) snprintf(nvram_path, sizeof(nvram_path), "%s", nvram_given);
-    else if (!headless_mode) {
+    else if (!headless_mode || prepare_mode) {
         char dir[4400];
         snprintf(dir, sizeof(dir), "%ssaves", data_dir());
         make_dir(dir);
@@ -889,8 +1071,13 @@ int main(int argc, char **argv) {
     nvram_load();
     if (getenv("RR_ADJUST") && !adjust_parse(getenv("RR_ADJUST")))   // operator settings, for tests
         fprintf(stderr, "RR_ADJUST: bad setting, or the EEPROM holds no settings yet\n");
+    for (i = 0; i < n_operator; i++)        // from RecompLauncher's settings, say
+        if (!adjust_parse(operator_specs[i]))
+            fprintf(stderr, "--operator %s: bad setting, or the game hasn't set up its "
+                    "EEPROM yet (it does on its first boot)\n", operator_specs[i]);
     rec_init();
     machine_reset();
+    if (prepare_mode) return prepare_one();
     if (dis_count) {
         disassemble(dis_addr, dis_count);
         return 0;
