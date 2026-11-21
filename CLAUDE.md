@@ -120,7 +120,8 @@ The game's ROMs and code are copyrighted. This repo is public.
   straight away) → interpreter. One module holds both CPUs, cached as
   `cache/rec-<key>.so|.dll` with its sources in `cache/src-<key>/`. All
   must give the same behaviour (verified: gcc, clang, Zig, TinyCC on
-  Linux, TinyCC on Windows under Wine).
+  Linux, TinyCC on Windows under Wine; the bundled Zig also builds and
+  plays on real Windows, v1.0.0, reported by the user).
 - Keep instruction semantics in `m68k_core.h` / `c31_core.h` only; the
   interpreters and the translators share them.
 - Every instruction start is an entry label; the dispatchers (`rec.c`)
@@ -230,7 +231,8 @@ See README.md, "Release packages". The Linux program targets glibc 2.31.
 Windows: `make windows` cross-compiles with MinGW (the windowed program
 needs `deps/sdl2-mingw`). Test the Windows module path with
 `RR_BUILD_WITH=tcc` under Wine (`tools/tcc/libtcc.dll` and `chkstk.S`
-beside the program); the Zig and cc paths need real Windows.
+beside the program). Zig fails under Wine (its cache needs file locking
+Wine lacks) but works on real Windows; a system cc on Windows is untested.
 
 Windowed testing without a display: run it under `Xvfb :99` with
 `SDL_AUDIODRIVER=dummy`, and send keys with `xdotool keydown` / `keyup`
