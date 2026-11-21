@@ -888,10 +888,16 @@ int main(int argc, char **argv) {
     }
 #ifdef RR_SDL
     // packaging helper: before anything writes a log or settings
-    if (argc == 3 && !strcmp(argv[1], "--write-icon")) {
+    // --write-icon FILE [SIZE] [square]: .ico, or a PNG (256 unless given;
+    // square = no rounded corners, for launchers that mask icons)
+    if (argc >= 3 && argc <= 5 && !strcmp(argv[1], "--write-icon")) {
         size_t n = strlen(argv[2]);
-        int png = n > 4 && !strcmp(argv[2] + n - 4, ".png");
-        return (png ? icon_write_png(argv[2], 256) : icon_write_ico(argv[2])) ? 0 : 1;
+        int png = n > 4 && !strcmp(argv[2] + n - 4, ".png"), size = 256;
+        for (i = 3; i < argc; i++) {
+            if (!strcmp(argv[i], "square")) icon_square = true;
+            else size = atoi(argv[i]);
+        }
+        return (png ? icon_write_png(argv[2], size) : icon_write_ico(argv[2])) ? 0 : 1;
     }
 #endif
     // First pass: the data folder, headless or not, a launcher's path.

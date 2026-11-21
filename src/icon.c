@@ -5,7 +5,10 @@
 #include "png.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+bool icon_square;   // for stores and launchers that mask icons themselves
 
 static uint32_t argb(float a, float r, float g, float b)
 {
@@ -24,7 +27,7 @@ void icon_pixels_text(uint32_t *px, int size, const char *text)
             float cx = x + 0.5f < rad ? rad : x + 0.5f > size - rad ? size - rad : x + 0.5f;
             float cy = y + 0.5f < rad ? rad : y + 0.5f > size - rad ? size - rad : y + 0.5f;
             float d = hypotf(x + 0.5f - cx, y + 0.5f - cy);
-            float a = d > rad ? 0 : d > rad - 1 ? rad - d : 1;
+            float a = icon_square ? 1 : d > rad ? 0 : d > rad - 1 ? rad - d : 1;
             float r = 0.05f + 0.02f * fy, g = 0.30f - 0.20f * fy, b = 0.12f - 0.07f * fy;
             // claw slashes from top right to bottom left, tapered at both ends
             if (size > 16)
@@ -112,8 +115,11 @@ bool icon_write_ico(const char *path)
 
 bool icon_write_png(const char *path, int size)
 {
-    static uint32_t px[256 * 256];
-    if (size > 256) return false;
+    if (size < 16 || size > 1024) return false;
+    uint32_t *px = malloc((size_t)size * size * 4);
+    if (!px) return false;
     icon_pixels(px, size);
-    return png_write_argb(path, px, size, size);
+    bool ok = png_write_argb(path, px, size, size);
+    free(px);
+    return ok;
 }
