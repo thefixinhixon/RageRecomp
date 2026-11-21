@@ -21,8 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install MinGW and Wine
-        run: sudo apt-get update -q && sudo apt-get install -qy gcc-mingw-w64-x86-64 wine64
+        # `wine` provides the command (on Ubuntu 24.04, wine64 alone has none)
+        run: sudo apt-get update -q && sudo apt-get install -qy gcc-mingw-w64-x86-64 wine64 wine
       - name: Build (Windows x64, headless program and tests)
         run: make windows
       - name: Unit tests (Wine)
-        run: for t in build-win/t_*.exe; do echo "== $t"; wine64 "$t" || exit 1; done
+        run: |
+          W=$(command -v wine64 || command -v wine)
+          for t in build-win/t_*.exe; do echo "== $t"; "$W" "$t" || exit 1; done
