@@ -77,6 +77,8 @@ echo "TinyCC source: https://repo.or.cz/tinycc.git, commit e23dabe (built unmodi
 
 # miniz (reads the MAME zips), compiled into the program
 cp src/third_party/miniz/LICENSE "$out/licenses/miniz-LICENSE.txt"
+# the LZMA SDK's 7z reader (reads .7z sets), compiled in; public domain
+cp src/third_party/lzma/README.txt "$out/licenses/LZMA-SDK-public-domain.txt"
 
 # shaders; the GPL extras are shipped as the source files they are
 cp -r shaders "$out/"

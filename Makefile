@@ -22,6 +22,12 @@ WFLAGS = -std=c11 -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation \
 INCS = -Isrc -I$(OUTDIR)/gen
 SYSLIBS ?= -lm -ldl
 
+# The LZMA SDK's 7z reader (MAME's .7z sets)
+LZMA_SRCS = $(addprefix src/third_party/lzma/,7zAlloc.c 7zArcIn.c 7zBuf.c \
+    7zBuf2.c 7zCrc.c 7zCrcOpt.c 7zDec.c 7zFile.c 7zStream.c Bcj2.c Bra.c \
+    Bra86.c BraIA64.c CpuArch.c Delta.c Lzma2Dec.c LzmaDec.c Ppmd7.c \
+    Ppmd7Dec.c)
+
 CORE_SRCS = \
     src/machine.c src/mem.c src/m68k.c src/c31.c src/cage.c \
     src/rec.c src/rec_build.c src/rec_none.c src/roms.c src/game.c \
@@ -32,6 +38,7 @@ CORE_SRCS = \
     src/third_party/miniz/miniz_tdef.c \
     src/third_party/miniz/miniz_tinfl.c \
     src/third_party/miniz/miniz_zip.c \
+    $(LZMA_SRCS) \
     $(OUTDIR)/gen/rec_headers.c
 
 GEN_C = $(OUTDIR)/gen/rec_headers.c
@@ -53,7 +60,7 @@ $(OUTDIR)/gen/version.o: $(OUTDIR)/gen/version.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 FORCE:
-TESTS = t_rmw t_ea t_an t_mem t_cage t_dsp_boot t_dsp_alu t_adjust
+TESTS = t_rmw t_ea t_an t_mem t_cage t_dsp_boot t_dsp_alu t_adjust t_roms
 TEST_BINS = $(addprefix $(OUTDIR)/,$(addsuffix $(EXE),$(TESTS)))
 
 HAVE_SDL ?= $(shell pkg-config --exists sdl2 2>/dev/null && echo yes)

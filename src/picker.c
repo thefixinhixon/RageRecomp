@@ -161,10 +161,10 @@ static void welcome_draw(const char *folder, const char *alt, const char *status
     int y = centred(180, "Welcome to " PRODUCT, 0xffc040, 3) + 4;
     y = centred(y, "A native port of the arcade game Primal Rage", 0x909090, 2) + 18;
     static const char *const need[] = {
-        "To play, add your own copies of MAME's files:",
+        "To play, add your own copies of MAME's files (.zip or .7z):",
         "  primrage.zip  - the game (or primrageo / primrage20",
         "                  with primrage.zip beside it)",
-        "  tms32031.zip  - the sound DSP's boot ROM",
+        "  tms32031.zip  - the sound DSP's boot ROM (tms320c31.zip)",
     };
     for (int i = 0; i < 4; i++, y += i == 1 ? 30 : 22)
         glyphs(wpx, WW, WH, 40, y, need[i], strlen(need[i]), i ? 0xb0b0b0 : 0xffffff, 2);

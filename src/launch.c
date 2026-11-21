@@ -39,9 +39,12 @@ int launch_open(const char *path, char *err, size_t n) {
     } else {
         int i;
         snprintf(dir, sizeof(dir), "%.*s", (int)(b - path), path);
-        // the set by its zip's name; anything else plays the configured one
+        // the set by its archive's name (.zip or .7z); anything else plays
+        // the configured one
         if (len > 4 && !strcmp(b + len - 4, ".zip"))
             snprintf(set, sizeof(set), "%.*s", (int)(len - 4), b);
+        else if (len > 3 && !strcmp(b + len - 3, ".7z"))
+            snprintf(set, sizeof(set), "%.*s", (int)(len - 3), b);
         for (i = 0; i < GAME_COUNT && set[0]; i++)
             if (!strcmp(game_profile((game_id_t)i)->set, set)) break;
         if (i == GAME_COUNT) set[0] = 0;

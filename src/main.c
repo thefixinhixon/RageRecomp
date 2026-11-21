@@ -55,6 +55,8 @@ static void usage(void) {
            "                  instead of opening the menu (F1 opens it)\n"
            "  --version       print the program's version and exit\n"
            "  --roms DIR      folder holding primrage.zip and tms32031.zip\n"
+           "                  (or tms320c31.zip, its name in newer MAME;\n"
+           "                  .7z sets work too)\n"
            "  --game-version SET  primrage (2.3, Jan 1995, default), primrageo\n"
            "                  (2.3, Dec 1994) or primrage20 (2.0)\n"
            "  --data-dir DIR  keep settings, saves, states, screenshots and the\n"
@@ -119,16 +121,28 @@ void app_report(bool fatal, const char *fmt, ...) {
 
 static const game_profile_t *prof;  // the set in use
 
-// The zips a set may draw on, in order: its own, the parent's (shared
-// graphics and sound), the C31 boot ROM. Returns how many paths.
+// Where a MAME set is: SET.zip or SET.7z (or ALT.zip/.7z, another name
+// for the set), searching each place for all of them before the next. Not
+// found: SET.zip, which fails to open and is reported.
+static void find_set(const char *set, const char *alt, char *out) {
+    char names[4][64], buf[4200];
+    const char *list[4];
+    int i, n = alt ? 4 : 2;
+    for (i = 0; i < n; i++) {
+        snprintf(names[i], sizeof(names[i]), "%s%s", i < 2 ? set : alt, i & 1 ? ".7z" : ".zip");
+        list[i] = names[i];
+    }
+    snprintf(out, 4200, "%s", find_data_any(list, n, roms_dir, buf, sizeof(buf)));
+}
+
+// The sets a game version draws on, in order: its own, the parent's
+// (shared graphics and sound), the C31 boot ROM (tms32031, renamed
+// tms320c31 in newer MAME versions). Returns how many paths.
 static int set_zips(const game_profile_t *p, char paths[3][4200]) {
-    char name[64], buf[4200];
     int n = 0;
-    snprintf(name, sizeof(name), "%s.zip", p->set);
-    snprintf(paths[n++], 4200, "%s", find_data(name, roms_dir, buf, sizeof(buf)));
-    if (strcmp(p->set, "primrage"))
-        snprintf(paths[n++], 4200, "%s", find_data("primrage.zip", roms_dir, buf, sizeof(buf)));
-    snprintf(paths[n++], 4200, "%s", find_data("tms32031.zip", roms_dir, buf, sizeof(buf)));
+    find_set(p->set, NULL, paths[n++]);
+    if (strcmp(p->set, "primrage")) find_set("primrage", NULL, paths[n++]);
+    find_set("tms32031", "tms320c31", paths[n++]);
     return n;
 }
 
@@ -169,7 +183,9 @@ static const char *files_help(void) {
             "Needed:\n"
             "  primrage.zip  - Primal Rage (for primrageo or primrage20, their zip\n"
             "                  as well, with primrage.zip beside it)\n"
-            "  tms32031.zip  - the TMS320C31 boot ROM (c31boot.bin), for sound", where);
+            "  tms32031.zip  - the TMS320C31 boot ROM (c31boot.bin), for sound;\n"
+            "                  newer MAME names it tms320c31.zip (either works)\n"
+            "MAME's .7z sets work too (primrage.7z, ...).", where);
     return buf;
 }
 
@@ -196,7 +212,7 @@ static int load_set(const game_profile_t *p) {
         app_report(false, "These files don't match MAME's good dumps of %s:\n\n%s\n"
                 "The game may not work correctly.", p->title, report);
     if (!cage.bootint || !cage.bootint[0])
-        app_report(false, "tms32031.zip (the sound DSP's boot ROM) was not found, so "
+        app_report(false, "tms32031.zip or tms320c31.zip (the sound DSP's boot ROM) was not found, so "
                 "the game runs without sound.\n\n%s", files_help());
     return 0;
 }

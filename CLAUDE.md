@@ -39,7 +39,7 @@ The game's ROMs and code are copyrighted. This repo is public.
 | Protection (XGA 136094-0004A) | `xga.c/h` |
 | EEPROM 2816 (kept across power cycles; `saves/<set>.eeprom`); chip bytes at even addresses | `eeprom.c/h`, `mem.c`, `main.c` |
 | Operator settings in the EEPROM (record code, option fields), Game page rows | `adjust.c/h` |
-| MAME zip loading, interleave, CRC checks, missing-file UX | `roms.c/h` |
+| MAME set loading (.zip via miniz, .7z via the LZMA SDK; told apart by content), interleave, CRC checks, missing-file UX | `roms.c/h`, `third_party/lzma/` |
 | Save states | `state.c/h` |
 | Window, menu, pacing, input, audio (adapted from UltraCombo) | `frontend.c`, `osd.c/h`, `config.c/h`, `controller_labels.c/h`, `screen.h` (336x240) |
 | Video, OpenGL, shader presets | `video.c/h`, `shaders.c/h`, `gl_funcs.h` |
@@ -297,7 +297,7 @@ read with `getenv` in `src/` (grep them for details).
   at STATE_FORMAT 7). Switching versions
   in the menu restarts the program on the new set. ROM files are found by
   name with the right CRC, else by CRC (merged sets), else by name.
-- Verified: 287 unit tests pass on Linux and under Wine; Linux + Windows
+- Verified: 298 unit tests pass on Linux and under Wine; Linux + Windows
   builds clean; `make packages` built and the AppImage (Zig, 83 s first
   launch) and Windows zip (under Wine, TinyCC) both start and play.
 - CI and release workflows written but never executed on GitHub Actions.

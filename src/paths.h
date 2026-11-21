@@ -19,6 +19,10 @@ const char *appimage_dir(void);
 // [game] roms setting, beside the program and run/ there, run/ beside an
 // AppImage, run/ in the data folder. Returns name when none has it.
 const char *find_data(const char *name, const char *roms_dir, char *buf, size_t n);
+// The same for the first of several names found, searching each place for
+// all of them before the next place.
+const char *find_data_any(const char *const *names, int count,
+        const char *roms_dir, char *buf, size_t n);
 // Make a folder (one level); fine if it exists.
 void make_dir(const char *path);
 int file_readable(const char *path);

@@ -131,27 +131,33 @@ const char *data_dir(void) {
     return dir;
 }
 
-const char *find_data(const char *name, const char *roms_dir, char *buf, size_t n) {
-    if (file_readable(name)) return name;
-    if (launch_dir()) {
-        snprintf(buf, n, "%s%s", launch_dir(), name);
-        if (file_readable(buf)) return buf;
-    }
+const char *find_data_any(const char *const *names, int count,
+        const char *roms_dir, char *buf, size_t n) {
+    // The places to look, in order; each is tried with every name before
+    // the next (so primrage.7z in the roms folder beats a zip elsewhere).
+    char dirs[7][4200];
+    int nd = 0, d, k;
+    dirs[nd++][0] = 0;  // the name as given
+    if (launch_dir()) snprintf(dirs[nd++], 4200, "%s", launch_dir());
     if (roms_dir && *roms_dir) {
         size_t l = strlen(roms_dir);
-        snprintf(buf, n, "%s%s%s", roms_dir, roms_dir[l - 1] == '/' || roms_dir[l - 1] == '\\' ? "" : "/", name);
-        if (file_readable(buf)) return buf;
+        snprintf(dirs[nd++], 4200, "%s%s", roms_dir,
+                roms_dir[l - 1] == '/' || roms_dir[l - 1] == '\\' ? "" : "/");
     }
-    snprintf(buf, n, "%s%s", base_dir(), name);
-    if (file_readable(buf)) return buf;
-    snprintf(buf, n, "%srun/%s", base_dir(), name);
-    if (file_readable(buf)) return buf;
-    if (appimage_dir()) {
-        snprintf(buf, n, "%srun/%s", appimage_dir(), name);
-        if (file_readable(buf)) return buf;
-    }
-    snprintf(buf, n, "%srun/%s", data_dir(), name);
-    return file_readable(buf) ? buf : name;
+    snprintf(dirs[nd++], 4200, "%s", base_dir());
+    snprintf(dirs[nd++], 4200, "%srun/", base_dir());
+    if (appimage_dir()) snprintf(dirs[nd++], 4200, "%srun/", appimage_dir());
+    snprintf(dirs[nd++], 4200, "%srun/", data_dir());
+    for (d = 0; d < nd; d++)
+        for (k = 0; k < count; k++) {
+            snprintf(buf, n, "%s%s", dirs[d], names[k]);
+            if (file_readable(buf)) return buf;
+        }
+    return names[0];
+}
+
+const char *find_data(const char *name, const char *roms_dir, char *buf, size_t n) {
+    return find_data_any(&name, 1, roms_dir, buf, n);
 }
 
 unsigned long long rr_ticks_us(void) {

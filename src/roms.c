@@ -6,41 +6,46 @@
 #include <string.h>
 
 #include "third_party/miniz/miniz.h"
+#include "third_party/lzma/7z.h"
+#include "third_party/lzma/7zAlloc.h"
+#include "third_party/lzma/7zCrc.h"
+#include "third_party/lzma/7zFile.h"
+
+// One file inside an archive, as the archive's directory lists it.
+typedef struct {
+    char name[256];     // bare name (no folders)
+    uint32_t crc;
+    uint64_t size;
+    uint32_t idx;       // the archive's own index for it
+} entry_t;
+
+// A MAME set as a .zip (miniz) or a .7z (LZMA SDK), told apart by content.
+typedef struct {
+    int is7z;
+    entry_t *ents;
+    int nents;
+    mz_zip_archive zip;
+    CFileInStream in7;
+    CLookToRead2 look;
+    CSzArEx db;
+    UInt32 block;       // SzArEx_Extract's cache: the last solid block
+    Byte *out;
+    size_t outsize;
+} arc_t;
 
 struct roms {
-    mz_zip_archive zips[8];
+    arc_t arcs[8];
     char paths[8][512];
-    int nzips;
+    int narcs;
     char problems[64][256];
     int nproblems;
     int missing;
 };
 
+static const ISzAlloc lzma_alloc = { SzAlloc, SzFree };
+
 static uint32_t crc32_of(const uint8_t *data, uint32_t len) {
     return (uint32_t)mz_crc32(MZ_CRC32_INIT, data, (size_t)len);
-}
-
-roms_t *roms_open(char const *const *zips, int nzips) {
-    roms_t *r = (roms_t *)calloc(1, sizeof(*r));
-    int i;
-    if (!r) return NULL;
-    if (nzips > 8) nzips = 8;
-    for (i = 0; i < nzips; i++) {
-        size_t n = strlen(zips[i]);
-        if (n >= sizeof(r->paths[i])) continue;
-        memcpy(r->paths[i], zips[i], n + 1);
-        memset(&r->zips[r->nzips], 0, sizeof(mz_zip_archive));
-        if (mz_zip_reader_init_file(&r->zips[r->nzips], zips[i], 0))
-            r->nzips++;
-    }
-    return r;
-}
-
-void roms_close(roms_t *r) {
-    int i;
-    if (!r) return;
-    for (i = 0; i < r->nzips; i++) mz_zip_end(&r->zips[i]);
-    free(r);
 }
 
 static const char *bare(const char *path) {
@@ -50,27 +55,144 @@ static const char *bare(const char *path) {
     return b2 ? b2 + 1 : path;
 }
 
+static int is_7z(const char *path) {
+    static const uint8_t sig[6] = { '7', 'z', 0xbc, 0xaf, 0x27, 0x1c };
+    uint8_t b[6];
+    FILE *f = fopen(path, "rb");
+    size_t n = f ? fread(b, 1, 6, f) : 0;
+    if (f) fclose(f);
+    return n == 6 && !memcmp(b, sig, 6);
+}
+
+static int open_zip(arc_t *a, const char *path) {
+    mz_uint i, n;
+    memset(&a->zip, 0, sizeof(a->zip));
+    if (!mz_zip_reader_init_file(&a->zip, path, 0)) return 0;
+    n = mz_zip_reader_get_num_files(&a->zip);
+    a->ents = (entry_t *)calloc(n ? n : 1, sizeof(entry_t));
+    for (i = 0; a->ents && i < n; i++) {
+        mz_zip_archive_file_stat st;
+        entry_t *e = &a->ents[a->nents];
+        if (!mz_zip_reader_file_stat(&a->zip, i, &st) || st.m_is_directory) continue;
+        snprintf(e->name, sizeof(e->name), "%s", bare(st.m_filename));
+        e->crc = st.m_crc32;
+        e->size = st.m_uncomp_size;
+        e->idx = i;
+        a->nents++;
+    }
+    return 1;
+}
+
+static int open_7z(arc_t *a, const char *path) {
+    static int crc_ready;
+    UInt32 i;
+    if (!crc_ready) { CrcGenerateTable(); crc_ready = 1; }
+    if (InFile_Open(&a->in7.file, path)) return 0;
+    FileInStream_CreateVTable(&a->in7);
+    LookToRead2_CreateVTable(&a->look, False);
+    a->look.buf = (Byte *)ISzAlloc_Alloc(&lzma_alloc, (size_t)1 << 18);
+    if (!a->look.buf) { File_Close(&a->in7.file); return 0; }
+    a->look.bufSize = (size_t)1 << 18;
+    a->look.realStream = &a->in7.vt;
+    LookToRead2_INIT(&a->look)
+    SzArEx_Init(&a->db);
+    if (SzArEx_Open(&a->db, &a->look.vt, &lzma_alloc, &lzma_alloc) != SZ_OK) {
+        SzArEx_Free(&a->db, &lzma_alloc);
+        ISzAlloc_Free(&lzma_alloc, a->look.buf);
+        File_Close(&a->in7.file);
+        return 0;
+    }
+    a->is7z = 1;
+    a->block = 0xffffffffu;
+    a->ents = (entry_t *)calloc(a->db.NumFiles ? a->db.NumFiles : 1, sizeof(entry_t));
+    for (i = 0; a->ents && i < a->db.NumFiles; i++) {
+        UInt16 name16[256];
+        entry_t *e = &a->ents[a->nents];
+        size_t k, len = SzArEx_GetFileNameUtf16(&a->db, i, NULL);
+        if (SzArEx_IsDir(&a->db, i) || len > 256) continue;
+        SzArEx_GetFileNameUtf16(&a->db, i, name16);
+        for (k = 0; k + 1 < len && k + 1 < sizeof(e->name); k++)
+            e->name[k] = name16[k] < 0x80 ? (char)name16[k] : '?';
+        e->name[k] = 0;
+        memmove(e->name, bare(e->name), strlen(bare(e->name)) + 1);
+        e->crc = SzBitWithVals_Check(&a->db.CRCs, i) ? a->db.CRCs.Vals[i] : 0;
+        e->size = SzArEx_GetFileSize(&a->db, i);
+        e->idx = i;
+        a->nents++;
+    }
+    return 1;
+}
+
+static void close_arc(arc_t *a) {
+    if (a->is7z) {
+        ISzAlloc_Free(&lzma_alloc, a->out);
+        SzArEx_Free(&a->db, &lzma_alloc);
+        ISzAlloc_Free(&lzma_alloc, a->look.buf);
+        File_Close(&a->in7.file);
+    } else {
+        mz_zip_end(&a->zip);
+    }
+    free(a->ents);
+}
+
+// The file's data (malloc'd), or NULL.
+static void *extract(arc_t *a, const entry_t *e, size_t *len) {
+    size_t off = 0, got = 0;
+    void *data;
+    *len = 0;
+    if (!a->is7z)
+        return mz_zip_reader_extract_to_heap(&a->zip, e->idx, len, 0);
+    if (SzArEx_Extract(&a->db, &a->look.vt, e->idx, &a->block, &a->out,
+            &a->outsize, &off, &got, &lzma_alloc, &lzma_alloc) != SZ_OK)
+        return NULL;
+    data = malloc(got ? got : 1);
+    if (data) {
+        memcpy(data, a->out + off, got);
+        *len = got;
+    }
+    return data;
+}
+
+roms_t *roms_open(char const *const *zips, int nzips) {
+    roms_t *r = (roms_t *)calloc(1, sizeof(*r));
+    int i;
+    if (!r) return NULL;
+    if (nzips > 8) nzips = 8;
+    for (i = 0; i < nzips; i++) {
+        size_t n = strlen(zips[i]);
+        arc_t *a = &r->arcs[r->narcs];
+        if (n >= sizeof(r->paths[i])) continue;
+        memcpy(r->paths[i], zips[i], n + 1);
+        memset(a, 0, sizeof(*a));
+        if (is_7z(zips[i]) ? open_7z(a, zips[i]) : open_zip(a, zips[i]))
+            r->narcs++;
+    }
+    return r;
+}
+
+void roms_close(roms_t *r) {
+    int i;
+    if (!r) return;
+    for (i = 0; i < r->narcs; i++) close_arc(&r->arcs[i]);
+    free(r);
+}
+
 // Where a file is: by name with the right CRC, else by CRC and length (the
 // way MAME finds a merged set's shared files, stored once under the
 // parent's name), else by name alone (a bad dump, reported). Returns 1
-// with *zi/*fi set.
-static int roms_find(roms_t *r, const rom_file_t *rf, int *zi_out, mz_uint *fi_out) {
-    int zi, pass;
+// with *ai/*ei set.
+static int roms_find(roms_t *r, const rom_file_t *rf, int *ai_out, int *ei_out) {
+    int ai, ei, pass;
     for (pass = 0; pass < 3; pass++) {
-        for (zi = 0; zi < r->nzips; zi++) {
-            mz_uint n = mz_zip_reader_get_num_files(&r->zips[zi]), fi;
-            for (fi = 0; fi < n; fi++) {
-                mz_zip_archive_file_stat st;
-                int by_name, by_crc;
-                if (!mz_zip_reader_file_stat(&r->zips[zi], fi, &st))
-                    continue;
-                by_name = !strcmp(bare(st.m_filename), rf->name);
-                by_crc = rf->crc && st.m_crc32 == rf->crc &&
-                        st.m_uncomp_size == rf->length;
+        for (ai = 0; ai < r->narcs; ai++) {
+            for (ei = 0; ei < r->arcs[ai].nents; ei++) {
+                const entry_t *e = &r->arcs[ai].ents[ei];
+                int by_name = !strcmp(e->name, rf->name);
+                int by_crc = rf->crc && e->crc == rf->crc && e->size == rf->length;
                 if (pass == 0 ? by_name && (by_crc || !rf->crc) :
                         pass == 1 ? by_crc : by_name) {
-                    *zi_out = zi;
-                    *fi_out = fi;
+                    *ai_out = ai;
+                    *ei_out = ei;
                     return 1;
                 }
             }
@@ -80,14 +202,13 @@ static int roms_find(roms_t *r, const rom_file_t *rf, int *zi_out, mz_uint *fi_o
 }
 
 uint8_t *roms_read(roms_t *r, const rom_file_t *rf, uint32_t *out_len) {
-    int zi;
-    mz_uint fi;
+    int ai, ei;
     char name[256];
     size_t uncomp = 0;
     void *data = NULL;
     *out_len = 0;
-    if (roms_find(r, rf, &zi, &fi))
-        data = mz_zip_reader_extract_to_heap(&r->zips[zi], fi, &uncomp, 0);
+    if (roms_find(r, rf, &ai, &ei))
+        data = extract(&r->arcs[ai], &r->arcs[ai].ents[ei], &uncomp);
     snprintf(name, sizeof(name), "%s", rf->name);
     if (!data) {
         if (r->nproblems < 64) {
@@ -116,9 +237,8 @@ uint8_t *roms_read(roms_t *r, const rom_file_t *rf, uint32_t *out_len) {
 // Is the file in any of the zips (by name, or by CRC and length)? No
 // reading or CRC check of the data.
 static int roms_has(roms_t *r, const rom_file_t *rf) {
-    int zi;
-    mz_uint fi;
-    return roms_find(r, rf, &zi, &fi);
+    int ai, ei;
+    return roms_find(r, rf, &ai, &ei);
 }
 
 int roms_has_set(roms_t *r, const game_profile_t *p) {
@@ -260,7 +380,8 @@ int roms_load_set(roms_t *r, const game_profile_t *p) {
     // Internal C31 boot ROM (c31boot.bin): player's own file, searched in
     // every opened zip (MAME also accepts it inside the game zip).
     {
-        rom_file_t bi = { "tms32031", "c31boot.bin", 0xbddc2763u, 16384u };
+        rom_file_t bi = { "tms32031.zip or tms320c31.zip", "c31boot.bin",
+                0xbddc2763u, 16384u };
         uint8_t *b;
         uint32_t bl, j;
         cage.bootint = (uint32_t *)calloc(0x1000u, 4);

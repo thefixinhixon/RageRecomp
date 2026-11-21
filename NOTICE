@@ -62,7 +62,13 @@ thefixinhixon, under the MIT licence (the same terms as LICENSE).
 src/third_party/stb_image.h by Sean Barrett, used to load shader lookup
 textures. Dual-licensed public domain / MIT; see the end of that file.
 
-5. Shader presets
+5. LZMA SDK (public domain)
+---------------------------
+src/third_party/lzma/ is the 7z reader from Igor Pavlov's LZMA SDK 25.01,
+placed in the public domain by its author, used to read MAME's .7z ROM
+sets. See src/third_party/lzma/README.txt.
+
+6. Shader presets
 -----------------
 shaders/ holds libretro GLSL presets (crt-lottes, crt-hyllian, crt-1tap,
 crt-2tap, xBR, ScaleFX) and Lola Retro's arcade-15khz, each under the

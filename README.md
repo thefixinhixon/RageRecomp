@@ -17,11 +17,13 @@ made from the game" discipline.
 ## What you need
 
 - A PC running 64-bit Windows 10+ or Linux (glibc 2.29+), with OpenGL 2.1+.
-- Your own MAME files, as zips, the way MAME keeps them:
+- Your own MAME files, as zips (or MAME's `.7z` sets), the way MAME keeps
+  them:
   - `primrage.zip`: Primal Rage version 2.3 (Jan 1995), MAME's parent set;
   - `tms32031.zip`: the TMS320C31 boot ROM (`c31boot.bin`), a MAME device
-    set of its own, not inside `primrage.zip` even when merged; the sound
-    DSP needs it, and without it the game runs silent;
+    set of its own, not inside `primrage.zip` even when merged (newer MAME
+    versions name it `tms320c31.zip`; either name works); the sound DSP
+    needs it, and without it the game runs silent;
   - optionally `primrageo.zip` (2.3, Dec 1994) and `primrage20.zip` (2.0),
     which take their shared graphics and sound from `primrage.zip`. A
     merged `primrage.zip` holding all three works too: as in MAME, files
@@ -30,10 +32,13 @@ made from the game" discipline.
 ## Quick start
 
 1. Download a release package (or build it, below) and unpack it.
-2. Put `primrage.zip` and `tms32031.zip` in its `run` folder.
+2. Put `primrage.zip` and `tms32031.zip` (or `tms320c31.zip`) in its `run`
+   folder.
 3. Start `RageRecomp.exe` (Windows) or `./ragerecomp` (Linux).
 
-With the AppImage, make a `run` folder beside the `.AppImage` file. If the
+`.7z` sets work the same way (`primrage.7z`, `tms32031.7z`, ...), and
+zip and 7z can be mixed. With the AppImage, make a `run` folder beside the
+`.AppImage` file. If the
 files aren't found the program opens a welcome screen that says where to put
 them (O opens the folder, Enter checks again).
 
