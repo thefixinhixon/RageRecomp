@@ -7,6 +7,9 @@
 // 0x26 on v2.0) and game options (0x29, 0x27) are bit fields as the test
 // menu's own tables describe them: game options round time bits 0-3,
 // difficulty 4-7, gore 8; coin options game cost bits 11-13, free play 15.
+// The attract volume (value 0x2a, 0x28 on v2.0) is the nibble right after
+// the game options: 8 mute, 9 a third, 10 two thirds, 11 the game volume,
+// as the test menu's Adjust Volume page writes it.
 #include "adjust.h"
 #include "eeprom.h"
 #include "machine.h"
@@ -14,17 +17,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct { uint8_t coin; uint8_t shift, width, choices; } field_t;
+// Which value holds a field: the game options, coin options or attract
+// volume; `base` is what the menu's first choice is stored as.
+enum { W_GAME, W_COIN, W_ATTRACT, W_COUNT };
+typedef struct { uint8_t word, shift, width, choices, base; } field_t;
 static const field_t fields[ADJ_COUNT] = {
-    [ADJ_DIFFICULTY] = { 0, 4, 4, 16 },
-    [ADJ_ROUND_TIME] = { 0, 0, 4, 11 },
-    [ADJ_FREE_PLAY]  = { 1, 15, 1, 2 },
-    [ADJ_GAME_COST]  = { 1, 11, 3, 8 },
-    [ADJ_GORE]       = { 0, 8, 1, 2 },
+    [ADJ_DIFFICULTY]    = { W_GAME, 4, 4, 16, 0 },
+    [ADJ_ROUND_TIME]    = { W_GAME, 0, 4, 11, 0 },
+    [ADJ_FREE_PLAY]     = { W_COIN, 15, 1, 2, 0 },
+    [ADJ_GAME_COST]     = { W_COIN, 11, 3, 8, 0 },
+    [ADJ_GORE]          = { W_GAME, 8, 1, 2, 0 },
+    [ADJ_ATTRACT_SOUND] = { W_ATTRACT, 0, 4, 4, 8 },
 };
 
-static int pending[ADJ_COUNT] = { -1, -1, -1, -1, -1 };
-static int running[ADJ_COUNT] = { -1, -1, -1, -1, -1 };
+static int pending[ADJ_COUNT] = { -1, -1, -1, -1, -1, -1 };
+static int running[ADJ_COUNT] = { -1, -1, -1, -1, -1, -1 };
+
+// Each value's nibble position and length in the record.
+static void word_at(int word, int *pos, int *cnt) {
+    const game_profile_t *p = mach_profile;
+    if (word == W_COIN) { *pos = p->coin_nibble; *cnt = 4; }
+    else if (word == W_GAME) { *pos = p->game_nibble; *cnt = 8; }
+    else { *pos = p->game_nibble + 8; *cnt = 1; }
+}
 
 int adjust_codeword_len(int len)
 {
@@ -110,10 +125,12 @@ static bool record_load(uint8_t *data)
 
 static int field_of(const uint8_t *data, adjust_id_t id)
 {
-    const game_profile_t *p = mach_profile;
     const field_t *f = &fields[id];
-    uint32_t w = f->coin ? nib_get(data, p->coin_nibble, 4) : nib_get(data, p->game_nibble, 8);
-    int v = (int)(w >> f->shift & ((1u << f->width) - 1));
+    int pos, cnt, v;
+    word_at(f->word, &pos, &cnt);
+    v = (int)(nib_get(data, pos, cnt) >> f->shift & ((1u << f->width) - 1));
+    if (v < f->base) v = f->base;       // (a zeroed record: the first choice)
+    v -= f->base;
     return v < f->choices ? v : -1;
 }
 
@@ -151,20 +168,21 @@ void adjust_apply(void)
 {
     const game_profile_t *p = mach_profile;
     uint8_t data[256];
+    uint32_t w[W_COUNT];
+    int pos, cnt, k;
     bool any = false;
     for (int i = 0; i < ADJ_COUNT; i++) any |= pending[i] >= 0;
     if (!any || !record_load(data)) return;
-    uint32_t coin = nib_get(data, p->coin_nibble, 4), game = nib_get(data, p->game_nibble, 8);
+    for (k = 0; k < W_COUNT; k++) { word_at(k, &pos, &cnt); w[k] = nib_get(data, pos, cnt); }
     for (int i = 0; i < ADJ_COUNT; i++) {
         if (pending[i] < 0) continue;
         const field_t *f = &fields[i];
-        uint32_t mask = ((1u << f->width) - 1) << f->shift, v = (uint32_t)pending[i] << f->shift;
-        if (f->coin) coin = (coin & ~mask) | v;
-        else game = (game & ~mask) | v;
+        uint32_t mask = ((1u << f->width) - 1) << f->shift;
+        uint32_t v = (uint32_t)(pending[i] + f->base) << f->shift;
+        w[f->word] = (w[f->word] & ~mask) | v;
         pending[i] = -1;
     }
-    nib_set(data, p->coin_nibble, 4, coin);
-    nib_set(data, p->game_nibble, 8, game);
+    for (k = 0; k < W_COUNT; k++) { word_at(k, &pos, &cnt); nib_set(data, pos, cnt, w[k]); }
     adjust_record_write(eeprom.data, p->opt_len, data);         // both copies, as the game keeps them
     adjust_record_write(eeprom.data + p->opt_copy2, p->opt_len, data);
 }
@@ -186,6 +204,10 @@ const char *adjust_text(adjust_id_t id, int v)
     case ADJ_FREE_PLAY: return v ? "On" : "Off";
     case ADJ_GAME_COST: snprintf(buf, sizeof buf, "%d coin%s 1 credit", v + 1, v ? "s" : ""); break;
     case ADJ_GORE: return v ? "No gore" : "Full gore";
+    case ADJ_ATTRACT_SOUND: {
+        static const char *const n[4] = { "Mute", "1/3 volume", "2/3 volume", "Full volume" };
+        return v < 4 ? n[v] : "?";
+    }
     default: return "?";
     }
     return buf;
@@ -193,7 +215,8 @@ const char *adjust_text(adjust_id_t id, int v)
 
 bool adjust_parse(const char *spec)
 {
-    static const char *const names[ADJ_COUNT] = { "difficulty", "round_time", "free_play", "game_cost", "gore" };
+    static const char *const names[ADJ_COUNT] = { "difficulty", "round_time", "free_play", "game_cost", "gore",
+        "attract_sound" };
     char buf[256];
     snprintf(buf, sizeof buf, "%s", spec);
     for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {

@@ -57,6 +57,18 @@ int main(void) {
     T_EQ_U32(rec[0x33], 0xf0, "game options: difficulty 16 (index 15) in bits 4-7");
     T_OK(adjust_record_read(eeprom.data + 0x5b, 0x53, back) && !memcmp(back, rec, sizeof rec), "second copy matches");
 
+    // Attract sound: the nibble after the game options (v2.3 nibble 110, the
+    // low half of byte 0x37), stored as the test menu does, 8 (mute) to 11.
+    T_EQ_U32(adjust_running(ADJ_ATTRACT_SOUND), 0, "zeroed record: attract sound mute");
+    T_OK(adjust_set(ADJ_ATTRACT_SOUND, 3) && !adjust_set(ADJ_ATTRACT_SOUND, 4), "attract sound full; past full refused");
+    adjust_apply();
+    machine_reset();
+    T_EQ_U32(adjust_running(ADJ_ATTRACT_SOUND), 3, "attract sound full after power-on");
+    T_OK(adjust_record_read(eeprom.data, 0x53, rec), "record still valid");
+    T_EQ_U32(rec[0x37] & 0x0f, 0x0b, "attract volume stored as 11 (full)");
+    T_EQ_U32(rec[0x33], 0xf0, "game options untouched");
+    T_EQ_STR(adjust_text(ADJ_ATTRACT_SOUND, 0), "Mute", "attract text");
+
     // Either intact copy is enough.
     eeprom.data[5] ^= 1;
     machine_reset();

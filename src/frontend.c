@@ -649,7 +649,7 @@ enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_PRACT
 enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_PERF, G_BACK, G_COUNT };
 enum { C_P1PAD, C_P2PAD, C_P1, C_P2, C_PAD, C_HOTKEYS, C_PADHOT, C_SOCD, C_RUMBLE, C_DEADZONE, C_P1LABELS, C_P2LABELS, C_BACK, C_COUNT };
 enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_VERSION, S_DIFFICULTY, S_ROUNDTIME, S_FREEPLAY, S_COST, S_GORE,
-       S_OPERATOR, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
+       S_ATTRACT, S_OPERATOR, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
 enum { T_TRAINING, T_REFILL, T_P2HEALTH, T_INPUTS, T_RECORD, T_PLAY, T_BACK, T_COUNT };
 enum { N_HOST, N_JOIN, N_ADDRESS, N_PORT, N_DELAY, N_DISCONNECT, N_BACK, N_COUNT };
 
@@ -901,7 +901,7 @@ static void draw_menu(uint32_t *out)
             static const struct { int row; adjust_id_t id; const char *name; } ops[] = {
                 { S_DIFFICULTY, ADJ_DIFFICULTY, "Difficulty" }, { S_ROUNDTIME, ADJ_ROUND_TIME, "Round time" },
                 { S_FREEPLAY, ADJ_FREE_PLAY, "Free play" }, { S_COST, ADJ_GAME_COST, "Coinage" },
-                { S_GORE, ADJ_GORE, "Blood" },
+                { S_GORE, ADJ_GORE, "Blood" }, { S_ATTRACT, ADJ_ATTRACT_SOUND, "Attract sound" },
             };
             for (size_t i = 0; i < sizeof ops / sizeof ops[0]; i++) {
                 int v = adjust_get(ops[i].id);
@@ -1155,8 +1155,9 @@ static void menu_change(int dir)
             osd_message("Could not restart: the version changes next time");
             return;
         }
-        case S_DIFFICULTY: case S_ROUNDTIME: case S_FREEPLAY: case S_COST: case S_GORE: {
-            static const adjust_id_t ids[] = { ADJ_DIFFICULTY, ADJ_ROUND_TIME, ADJ_FREE_PLAY, ADJ_GAME_COST, ADJ_GORE };
+        case S_DIFFICULTY: case S_ROUNDTIME: case S_FREEPLAY: case S_COST: case S_GORE: case S_ATTRACT: {
+            static const adjust_id_t ids[] = { ADJ_DIFFICULTY, ADJ_ROUND_TIME, ADJ_FREE_PLAY, ADJ_GAME_COST, ADJ_GORE,
+                ADJ_ATTRACT_SOUND };
             adjust_id_t id = ids[menu_sel - S_DIFFICULTY];
             if (in_netplay()) { not_in_netplay(); return; }      // the host's EEPROM is the session's
             int v = adjust_get(id), n = adjust_choices(id);

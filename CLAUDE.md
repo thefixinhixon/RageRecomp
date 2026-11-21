@@ -149,7 +149,8 @@ The game's ROMs and code are copyrighted. This repo is public.
 - No "resume where you left off" on launch.
 - Settings live in the table in `config.c` (`MAX_OPTS`), and
   `ragerecomp.ini` is written from it with comments. The game's own
-  settings (coinage, free play, difficulty, round time, gore) stay in the
+  settings (coinage, free play, difficulty, round time, gore, attract
+  sound) stay in the
   cabinet's EEPROM: the menu edits them there the way the game's test menu
   stores them (`adjust.c`), held until the next power-on; not in the ini.
   The rest stays in the game's test mode (the test-switch hotkey, F2).
@@ -205,7 +206,7 @@ Useful environment variables:
   reset after N frames must equal a fresh power-on), `RR_DESYNC_AT`
   (netplay), `RR_DUMP_ON_EXC`, `RR_COVER` (interpreter coverage),
   `RR_TRAINING=F` (windowed program's headless mode), `RR_ADJUST=
-  difficulty=16,free_play=1,round_time=80,game_cost=2,gore=1` (operator
+  difficulty=16,free_play=1,round_time=80,game_cost=2,gore=1,attract_sound=3` (operator
   settings into the EEPROM image before power-on; it must hold the game's
   settings already: boot once with `--nvram` for 1500 frames).
 - `RR_LOG_FRAME=2`: 68K position after every scanline (for bisecting a
@@ -274,16 +275,20 @@ read with `getenv` in `src/` (grep them for details).
   stored with the driver's code (data at non-power-of-two indices, parity
   bytes at powers of two and 0). Coin options are value 0x28 (0x26 on
   v2.0), game options 0x29 (0x27); fields from the test menu's own tables.
+  The attract volume (0x2a, 0x28 on v2.0) is the nibble after the game
+  options: 8 mute (the default), 9 a third, 10 two thirds, 11 full, found
+  by saving it on the test menu's Adjust Volume page.
   Verified: the game keeps edited records, its GAME OPTIONS page shows
-  them, free play starts a game on all three versions.
+  them, free play starts a game, attract sound plays at the chosen level,
+  on all three versions.
 - Frontend (from UltraCombo, feature for feature): menu, ragerecomp.ini,
   OpenGL with filters and libretro presets, gamepads with assignment,
   labels and rumble, save states, rewind, run-ahead, boot skip, auto-coin,
   training mode with dummy record/play, input display, rollback netplay,
   screenshots, pacing, welcome screen, launcher paths, operator settings
   (UltraCombo's DIP/difficulty rows: difficulty, round time, free play,
-  coinage, gore). Not applicable to this hardware: finishing-move and
-  attract-sound switches, disk speed, cabinet volume buttons, service
+  coinage, gore, attract sound). Not applicable to this hardware:
+  finishing-move switch, disk speed, cabinet volume buttons, service
   credit.
 - Game RAM (traced with RR_DUMP_AT; `game.c`): credits, round clock,
   fighter records (damage taken at +0x5A, 8.8, KO at 0x7800), players
@@ -301,7 +306,7 @@ read with `getenv` in `src/` (grep them for details).
   at STATE_FORMAT 8). Switching versions
   in the menu restarts the program on the new set. ROM files are found by
   name with the right CRC, else by CRC (merged sets), else by name.
-- Verified: 298 unit tests pass on Linux and under Wine; Linux + Windows
+- Verified: 305 unit tests pass on Linux and under Wine; Linux + Windows
   builds clean; `make packages` built and the AppImage (Zig, 83 s first
   launch) and Windows zip (under Wine, TinyCC) both start and play.
 - CI and release workflows written but never executed on GitHub Actions.

@@ -12,6 +12,7 @@ typedef enum {
     ADJ_FREE_PLAY,      // 0 no, 1 yes
     ADJ_GAME_COST,      // 0-7: 1 to 8 coins per credit; default 2
     ADJ_GORE,           // 0 full gore, 1 no gore
+    ADJ_ATTRACT_SOUND,  // 0 mute, 1 1/3, 2 2/3, 3 full (of the game volume); default mute
     ADJ_COUNT
 } adjust_id_t;
 
@@ -34,7 +35,8 @@ void adjust_apply(void);
 // Note what the game is running with: call right after each power-on.
 void adjust_powered_on(void);
 // Apply "name=value,..." (names: difficulty 1-16, round_time 30-80,
-// free_play 0/1, game_cost 1-8, gore 0/1) straight to the EEPROM image;
+// free_play 0/1, game_cost 1-8, gore 0/1, attract_sound 0-3) straight to
+// the EEPROM image;
 // for RR_ADJUST in tests. Returns false on a bad name or value.
 bool adjust_parse(const char *spec);
 

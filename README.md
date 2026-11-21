@@ -109,12 +109,13 @@ main ones, the same way the game's test menu stores them:
 | Free play | Off / On (Off) |
 | Coinage | 1 to 8 coins per credit (2) |
 | Blood | Full gore / No gore (Full gore) |
+| Attract sound | Mute, 1/3, 2/3 or full volume during the attract (Mute) |
 
 The game reads them when the cabinet powers on, so a change (marked `*`)
 applies on "Reset game", or the next start. On the very first start the
 game writes its defaults during its boot, so they can be changed once it
 has booted. Everything else (bonus coins, coin mechanisms, continue
-discount, language, volumes, statistics, tests) is in the game's own test
+discount, language, game volume, statistics, tests) is in the game's own test
 menu: hold F2. "Reset game" power-cycles the cabinet and keeps the EEPROM,
 as the real board does.
 
