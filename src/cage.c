@@ -158,6 +158,16 @@ static void cage_update_dma(void) {
     cage.dma_enabled = enabled ? 1 : 0;
 }
 
+// After a state load: word_cyc follows the restored serial registers (it
+// isn't in the state), instead of keeping the value from before the load.
+// (No run so far shows a difference: the game rewrites those registers.)
+static void cage_update_serial(void);
+void cage_serial_restored(void) {
+    uint32_t rate = cage.dac_rate;      // saved; keep it as it was
+    cage_update_serial();
+    cage.dac_rate = rate;
+}
+
 static void cage_update_timer(int which) {
     uint32_t base = 0x10u * (uint32_t)which;
     int enabled = ((cage.io[base + TIMER0_GLOBAL_CTL] & 0xc0) == 0xc0);

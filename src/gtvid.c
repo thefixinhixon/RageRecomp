@@ -798,7 +798,9 @@ int gt_state_valid(const uint8_t *src) {
     size_t i;
     for (i = 0; i < sizeof(gt_cb); i++)
         if (cb[i] > 0x1fu || tb[i] > 15u) return 0;
-    return cur[4] <= 0x1fu && cur[5] <= 15u && partial >= -1 && partial < 240;
+    // the partial-erase line is the scanline of the last MO control write
+    // (0-261; 240+ at the end of a frame), or -1 after vblank
+    return cur[4] <= 0x1fu && cur[5] <= 15u && partial >= -1 && partial < (int32_t)GT_LINES;
 }
 
 void gt_state_load(const uint8_t *src) {

@@ -52,6 +52,7 @@ extern int cage_slice_budget;
 // Connect the DSP page tables to the board memory. Called after the ROMs
 // are loaded (boot/srom may be NULL before that; reads return 0).
 void cage_map_pages(void);
+void cage_serial_restored(void);   // after a state load (state.c)
 // Slice bracketing for the DSP-cycle clock (call around each DSP run).
 void cage_slice_begin(int budget);
 void cage_slice_end(void);

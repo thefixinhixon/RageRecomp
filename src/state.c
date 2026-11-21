@@ -281,10 +281,11 @@ int machine_state_load(const uint8_t *src, uint32_t size) {
     mach.frames = (uint64_t)get32(p + 52) | ((uint64_t)get32(p + 56) << 32);
     p += 60;
     gt_state_load(p);
-    // Derived state: re-derive the DSP float word rate (done above),
-    // refresh the IRQ lines, and re-validate translated DSP chunks.
+    // Derived state: re-derive the serial word rate from the restored
+    // registers, refresh the IRQ lines, and re-validate translated DSP chunks.
     mem_map_pages();
     cage_map_pages();
+    cage_serial_restored();
     mem_update_irq();
     dsp_revalidate();
     return 0;
@@ -439,10 +440,19 @@ double state_history_seconds(void) {
 
 size_t state_history_bytes(void) { return hist_bytes; }
 
+// The blob is one this build just wrote, so a refusal is a bug in the checks
+// (v1.1.1 refused any state taken with the partial-erase line at 240 or
+// later: rewind, run-ahead and rollback then silently didn't restore).
 static void restore(const uint8_t *src) {
+    static int warned;
     uint32_t size;
+    int rc;
     machine_state_size(&size);
-    machine_state_load(src, size);
+    rc = machine_state_load(src, size);
+    if (rc && !warned) {
+        fprintf(stderr, "state: restoring a checkpoint failed (%d)\n", rc);
+        warned = 1;
+    }
 }
 
 void state_init(void) {

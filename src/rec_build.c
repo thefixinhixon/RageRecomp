@@ -162,10 +162,15 @@ static int read_sources(const char *src, char *files, size_t n) {
 }
 
 // Written when TinyCC was the best compiler there was: next time it is used
-// straight away (it compiles the cached sources into memory).
+// straight away (it compiles the cached sources into memory). It names the
+// compilers that were tried ("tried: zig gcc"), so one that turns up later
+// (Zig copied in, a compiler installed) gets its chance once.
 static void tcc_marker(const char *src, char *out, size_t n) {
     snprintf(out, n, "%s/use-tinycc", src);
 }
+
+static const char *const system_ccs[] = { "cc", "gcc", "clang" };
+#define N_SYSTEM_CCS (sizeof(system_ccs) / sizeof(system_ccs[0]))
 
 #define MAX_JOBS 16
 #define CMD_ARGS 160
@@ -551,8 +556,10 @@ static void set_env(const char *k, const char *v) {
 
 static int compile_and_load(const char *src, const char *list, const char *module,
         const char *log, char *msg, size_t msglen) {
-    char cc[4200], err[512] = "";
+    char cc[4200], err[512] = "", tried[64] = "tried:";
     const char *only = getenv("RR_BUILD_WITH");     // testing: zig, cc, gcc, clang or tcc
+    char marker[4400];
+    tcc_marker(src, marker, sizeof(marker));
     // 1. a bundled Zig
     snprintf(cc, sizeof(cc), "%stools/zig/zig" EXE_EXT, base_dir());
     if (file_readable(cc) && (!only || !strcmp(only, "zig")) && zig_runs_here()) {
@@ -560,31 +567,35 @@ static int compile_and_load(const char *src, const char *list, const char *modul
         snprintf(zc, sizeof(zc), "%scache/zig", data_dir());   // kept across builds
         set_env("ZIG_GLOBAL_CACHE_DIR", zc);
         set_env("ZIG_LOCAL_CACHE_DIR", zc);
+        strcat(tried, " zig");
         if (build_with(cc, 1, src, list, module, log) &&
                 rec_build_load_file(module, err, sizeof(err))) {
+            remove(marker);
             snprintf(msg, msglen, "translated code built with Zig");
             return 1;
         }
     }
     // 2. a C compiler already on the system
     {
-        static const char *const names[] = { "cc", "gcc", "clang" };
         size_t i;
-        for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
-            if (only && strcmp(only, "cc") && strcmp(only, names[i])) continue;
-            if (!find_program(names[i], cc, sizeof(cc))) continue;
+        for (i = 0; i < N_SYSTEM_CCS; i++) {
+            if (only && strcmp(only, "cc") && strcmp(only, system_ccs[i])) continue;
+            if (!find_program(system_ccs[i], cc, sizeof(cc))) continue;
+            strcat(tried, " ");
+            strcat(tried, system_ccs[i]);
             if (build_with(cc, 0, src, list, module, log) &&
                     rec_build_load_file(module, err, sizeof(err))) {
-                snprintf(msg, msglen, "translated code built with %s", names[i]);
+                remove(marker);
+                snprintf(msg, msglen, "translated code built with %s", system_ccs[i]);
                 return 1;
             }
         }
     }
     // 3. TinyCC
     if ((!only || !strcmp(only, "tcc")) && load_with_tcc(src, list, err, sizeof(err))) {
-        char marker[4400];
-        tcc_marker(src, marker, sizeof(marker));
-        write_text(marker, "TinyCC was the only compiler that worked\n");
+        char text[128];
+        snprintf(text, sizeof(text), "TinyCC was the only compiler that worked\n%s\n", tried);
+        write_text(marker, text);
         snprintf(msg, msglen, "translated code built with TinyCC (slower; see README)");
         return 1;
     }
@@ -722,6 +733,36 @@ static int translate(const char *dir, const char *m68k, const char *dsp,
     return rc;
 }
 
+// A compiler that is here now but wasn't when TinyCC was chosen (the marker's
+// "tried:" line; markers from before v1.1.2 have none).
+static int untried_compiler(const char *marker) {
+    char text[256] = "", path[4200], *t;
+    FILE *f = fopen(marker, "rb");
+    size_t i, got;
+    if (f) {
+        got = fread(text, 1, sizeof(text) - 1, f);
+        text[got] = 0;
+        fclose(f);
+    }
+    t = strstr(text, "tried:");
+    if (!t) t = "";
+    snprintf(path, sizeof(path), "%stools/zig/zig" EXE_EXT, base_dir());
+    if (file_readable(path) && zig_runs_here() && !strstr(t, " zig")) return 1;
+    for (i = 0; i < N_SYSTEM_CCS; i++) {
+        char word[16];
+        const char *w;
+        size_t len;
+        int seen = 0;
+        if (!find_program(system_ccs[i], path, sizeof(path))) continue;
+        snprintf(word, sizeof(word), " %s", system_ccs[i]);
+        len = strlen(word);
+        for (w = strstr(t, word); w; w = strstr(w + 1, word))
+            if (w[len] == 0 || w[len] == ' ' || w[len] == '\n' || w[len] == '\r') seen = 1;
+        if (!seen) return 1;
+    }
+    return 0;
+}
+
 bool rec_build_load_cached(char *msg, size_t msglen) {
     static char files[16384];
     char module[4400], src[4400], err[512], marker[4500];
@@ -732,6 +773,7 @@ bool rec_build_load_cached(char *msg, size_t msglen) {
         return true;
     }
     tcc_marker(src, marker, sizeof(marker));
+    if (file_readable(marker) && untried_compiler(marker)) return false;   // rebuild with it
     if (file_readable(marker) && read_sources(src, files, sizeof(files)) &&
             load_with_tcc(src, files, err, sizeof(err))) {
         snprintf(msg, msglen, "translated code built with TinyCC");

@@ -117,7 +117,10 @@ The game's ROMs and code are copyrighted. This repo is public.
 - Compiler order at first launch: bundled Zig (`tools/zig`) → system
   cc/gcc/clang → TinyCC loaded as a library (`tools/tcc`, compiles into
   memory in seconds; a `use-tinycc` marker makes later launches use it
-  straight away) → interpreter. One module holds both CPUs, cached as
+  straight away, unless a compiler its `tried:` line doesn't name has
+  turned up since, e.g. Zig copied in: then it rebuilds once) → interpreter.
+  TinyCC's code is much slower: on a Celeron J4125 it misses 60 fps where
+  Zig's holds it (~11 ms a frame in fights; Zig's first build there: 597 s). One module holds both CPUs, cached as
   `cache/rec-<key>.so|.dll` with its sources in `cache/src-<key>/`. All
   must give the same behaviour (verified: gcc, clang, Zig, TinyCC on
   Linux, TinyCC on Windows under Wine; the bundled Zig also builds and
@@ -331,7 +334,11 @@ read with `getenv` in `src/` (grep them for details).
   tables (CAGE FIFO positions, scanline, per-line colour/tile banks, the
   partial motion-object line, the DSP's delayed-branch count) in range
   (else "damaged"), checked before anything is restored (`t_state`), as
-  UltraCombo's v1.0.4 (#3).
+  UltraCombo's v1.0.4 (#3). Rewind, run-ahead and rollback restore through
+  the same checks, so a limit that's too tight breaks them: v1.1.1 allowed
+  the partial line only below 240, but it is the last MO-control scanline
+  (up to 261), so 98% of restores were refused. Check `--runahead 2` and
+  `--rewind-test` against the plain hash after touching them.
 - The window title, the welcome screen, the menu title, the log's first
   line, `--version` and the Windows file properties show the program's
   version (as UltraCombo's v1.2.7, #14).
@@ -339,7 +346,7 @@ read with `getenv` in `src/` (grep them for details).
   has that this hardware lacks (game picker, disk speed and disk-wait,
   blood colour, finishing moves, breaker reward, two-bar health) is left
   out on purpose. `.recomp.json` describes the project for recomp.fyi.
-- Verified: 329 unit tests pass on Linux and under Wine; Linux + Windows
+- Verified: 338 unit tests pass on Linux and under Wine; Linux + Windows
   builds clean; `make packages` built and the AppImage (Zig, 83 s first
   launch) and Windows zip (under Wine, TinyCC) both start and play.
 - CI (Linux + Windows under Wine) and the release workflow run on GitHub

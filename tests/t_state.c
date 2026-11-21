@@ -5,6 +5,8 @@
 #include "support.h"
 #include "state.h"
 #include "xga.h"
+#include "gtvid.h"
+#include <string.h>
 
 #define PATH "t_state.rrs"
 
@@ -79,6 +81,20 @@ int main(void) {
 
     // in range: still loads
     T_OK(load_with(gt_off() + 960 + 17, 0x1f) == 1, "colour bank 0x1f loads");
+    {
+        // the partial-erase line (big-endian, just before the palette at the
+        // end) is a scanline: 0-261, or -1
+        long part = blob_len - 0x8000L * 4 - 4;
+        uint8_t was[4];
+        memcpy(was, blob + part, 4);
+        memset(blob + part, 0, 3);
+        T_OK(load_with(part + 3, 240) == 1, "partial-erase line 240 loads");
+        T_OK(load_with(part + 3, 255) == 1, "partial-erase line 255 loads");
+        blob[part + 2] = 1;     // 261 = 0x105
+        T_OK(load_with(part + 3, 5) == 1, "partial-erase line 261 loads");
+        T_OK(load_with(part + 3, 6) == -1, "partial-erase line 262 is damaged");
+        memcpy(blob + part, was, 4);
+    }
 
     // another build or ROM: 0, not damaged
     T_OK(load_with(4, 0x77) == 0, "another state format is refused as another version");
@@ -91,6 +107,16 @@ int main(void) {
         free(mach.rom);
         mach.rom = mine;
     }
+
+    // rollback from a state taken late in a frame (v1.1.1 refused these)
+    mach.scanline = 240;
+    gt_mo_control(0);       // partial-erase line = 240
+    mach.ram[0x100] = 0x11;
+    state_checkpoint();
+    mach.ram[0x100] = 0x22;
+    state_rollback();
+    T_EQ_U32(mach.ram[0x100], 0x11, "rollback with the partial-erase line at 240");
+    mach.scanline = 0;
 
     remove(PATH);
     T_OK(state_load_file(PATH) == 0, "missing file");
