@@ -64,7 +64,7 @@
     },
     {
       "id": "picture", "label": "Picture", "group": "Video",
-      "help": "How the arcade's 336x240 picture is drawn: crisp pixels, a CRT look, or a pixel-art upscaler.",
+      "help": "How the arcade's 336x240 picture is drawn: crisp pixels, a CRT look, or a pixel-art upscaler. Every preset in the shaders folder is in the game's menu (Graphics, Shader).",
       "choices": [
         { "label": "Sharp pixels", "set": { "video/filter": "sharp", "video/shader": "" } },
         { "label": "Smooth", "set": { "video/filter": "smooth", "video/shader": "" } },
@@ -74,7 +74,13 @@
         { "label": "CRT-Hyllian", "set": { "video/shader": "shaders/crt/crt-hyllian.glslp" } },
         { "label": "Arcade 15 kHz", "set": { "video/shader": "shaders/lola-retro/arcade-15khz.glslp" } },
         { "label": "xBR", "set": { "video/shader": "shaders/xbr/xbr-lv3.glslp" } },
-        { "label": "ScaleFX", "set": { "video/shader": "shaders/scalefx/scalefx.glslp" } }
+        { "label": "ScaleFX", "set": { "video/shader": "shaders/scalefx/scalefx.glslp" } },
+        { "label": "CRT-Royale", "set": { "video/shader": "shaders/extra/crt/crt-royale.glslp" } },
+        { "label": "CRT-Guest", "set": { "video/shader": "shaders/extra/crt/crt-guest-dr-venom.glslp" } },
+        { "label": "CRT-Geom", "set": { "video/shader": "shaders/extra/crt/crt-geom.glslp" } },
+        { "label": "CRT-Easymode", "set": { "video/shader": "shaders/extra/crt/crt-easymode.glslp" } },
+        { "label": "zfast CRT", "set": { "video/shader": "shaders/extra/crt/zfast-crt.glslp" } },
+        { "label": "xBRZ", "set": { "video/shader": "shaders/extra/xbrz/xbrz-freescale.glslp" } }
       ],
       "defaults": { "video/filter": "sharp", "video/shader": "" }
     },

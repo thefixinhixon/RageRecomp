@@ -1,0 +1,58 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Primal Rage",
+  "system": "Arcade",
+  "type": "recomp",
+  "original": [
+    {
+      "revision": "2.3 (Jan 1995)",
+      "sha1": "a1da01e5c93f3a1183b5d0ede990bdc444b1dd25"
+    },
+    {
+      "revision": "2.3 (Dec 1994)"
+    },
+    {
+      "revision": "2.0"
+    }
+  ],
+  "project": "RageRecomp",
+  "status": "released",
+  "targets": [
+    "Windows",
+    "Linux"
+  ],
+  "toolchain": "RageRecomp's own 68EC020-to-C and TMS320C31-to-C translators",
+  "approach": "The original Motorola 68EC020 game code and the CAGE sound board's TMS320C31 code are statically translated to C and compiled on the player's PC at first launch (bundled Zig or TinyCC); the Atari GT board around them is emulated, following MAME's drivers. Translated and interpreted runs are bit-identical.",
+  "maintainers": [
+    {
+      "name": "thefixinhixon",
+      "link": "https://github.com/thefixinhixon"
+    }
+  ],
+  "links": [
+    {
+      "label": "Releases",
+      "url": "https://github.com/thefixinhixon/RageRecomp/releases"
+    },
+    {
+      "label": "Sister project: UltraCombo (Killer Instinct)",
+      "url": "https://github.com/thefixinhixon/UltraCombo"
+    }
+  ],
+  "launchers": [
+    {
+      "path": "recomplauncher.json",
+      "format": "RecompLauncher"
+    }
+  ],
+  "help": [
+    "Netplay testing with a real second player",
+    "Side-by-side comparisons with a real cabinet (picture, sound, timing)",
+    "Testing the first-launch build on more Windows PCs"
+  ],
+  "tags": [
+    "fighting",
+    "atari-gt"
+  ],
+  "notes": "v1.1.0: Windows zip, Linux tarball and AppImage, and set up in one step by RecompLauncher (level 3). Plays all three arcade versions (2.3 Jan 1995, 2.3 Dec 1994, 2.0) with music and sound, authentic by default, with optional training mode, rollback netplay, save states, rewind, run-ahead and libretro shaders. The SHA-1 is of MAME's merged primrage.zip as TorrentZip'd by current ROM managers; other packings work too. No game files are included: players supply their own."
+}

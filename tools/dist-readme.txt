@@ -32,7 +32,7 @@ the program if that folder is writable, otherwise into your user data folder:
   Windows: %APPDATA%\RageRecomp\
   Linux:   ~/.local/share/RageRecomp/
 
-Linux: needs glibc 2.29 or newer (distributions from about 2020 on). SDL2
+Linux: needs glibc 2.31 or newer (distributions from about 2020 on). SDL2
 is included, in lib/.
 
 Press F1 (or Esc) in the game for the menu; hold F2 for the cabinet's own
@@ -42,7 +42,7 @@ Primal Rage is a trademark of its owners. This project is not affiliated
 with or endorsed by them.
 
 Licences are in the "licenses" folder: RageRecomp itself (MIT), SDL2
-(zlib), miniz (MIT), Zig (MIT), TinyCC (LGPL 2.1, used as a separate
+(zlib), miniz (MIT), the LZMA SDK (public domain), Zig (MIT), TinyCC (LGPL 2.1, used as a separate
 library; source: see tools/tcc/SOURCE.txt), shaders (licence header in each
 file; those in shaders/extra are GPL: xBRZ GPL 3.0, the others GPL 2.0 or
 later).

@@ -182,7 +182,7 @@ Build and run (needs gcc, SDL2, python3; game files in `run/`):
 Regression test: a fixed 3600-frame boot, coin-up and fight, printing a
 state hash:
 
-    tools/regress.sh PROGRAM SET [RUN_DIR] [WORK_DIR]
+    tools/regress.sh PROGRAM SET [RUN_DIR] [WORK_DIR]   # SET: primrage, primrageo or primrage20
 
 The hash is the same for translated and interpreted runs, for every
 compiler and for linked-in code; current value (primrage, STATE_FORMAT 8): `39e17cc18b311d06`. The state no longer folds in the
@@ -223,8 +223,17 @@ Packages (no game files, no game code):
 
     make packages        # dist/RageRecomp-vVER-Windows-x64.zip, -Linux-x64.tar.xz, -Linux-x64.AppImage (+ .zsync)
 
-Pushing a version tag builds them on GitHub Actions
-(`.github/workflows/release.yml`) into a draft release.
+Packages are made only from committed work: the version is `git describe`,
+and with uncommitted changes it ends in `-dirty`, so the package targets
+stop (`ALLOW_DIRTY=1` for a throwaway test build). They always include the
+GPL extra shaders (`make shaders-extra` runs if `shaders/extra` is
+missing), as the release workflow does: 30 presets, `--test-shaders`
+loads every one. Pushing a version tag builds them on GitHub Actions
+(`.github/workflows/release.yml`) into a draft release, published as a
+full release unless it's a test build. Release notes follow UltraCombo's
+layout: what's new (with thanks to reporters), save-state and netplay
+compatibility, "No game files are included", steps per platform and
+RecompLauncher, the trademark line.
 `tools/fetch-deps.sh` fills `deps/` from pinned, checksummed downloads.
 See README.md, "Release packages". The Linux program targets glibc 2.31.
 
@@ -310,10 +319,23 @@ read with `getenv` in `src/` (grep them for details).
   with button 1), each with zero interpreted instructions and translated
   = interpreted hashes over the scripted 3600 frames (`--script` as in
   regress.sh; primrageo `c3bebbd4cfffbd2a`, primrage20 `c78de1915c906f64`
-  at STATE_FORMAT 8). Switching versions
+  at STATE_FORMAT 8; `tools/regress.sh` runs all three). Switching versions
   in the menu restarts the program on the new set. ROM files are found by
   name with the right CRC, else by CRC (merged sets), else by name.
-- Verified: 305 unit tests pass on Linux and under Wine; Linux + Windows
+- Save states: a file must be exactly one state with this build's
+  format and ROM (else "another version"), and the values that index
+  tables (CAGE FIFO positions, scanline, per-line colour/tile banks, the
+  partial motion-object line, the DSP's delayed-branch count) in range
+  (else "damaged"), checked before anything is restored (`t_state`), as
+  UltraCombo's v1.0.4 (#3).
+- The window title, the welcome screen, the menu title, the log's first
+  line, `--version` and the Windows file properties show the program's
+  version (as UltraCombo's v1.2.7, #14).
+- UltraCombo parity checked against its releases up to v1.2.8; what it
+  has that this hardware lacks (game picker, disk speed and disk-wait,
+  blood colour, finishing moves, breaker reward, two-bar health) is left
+  out on purpose. `.recomp.json` describes the project for recomp.fyi.
+- Verified: 329 unit tests pass on Linux and under Wine; Linux + Windows
   builds clean; `make packages` built and the AppImage (Zig, 83 s first
   launch) and Windows zip (under Wine, TinyCC) both start and play.
 - CI (Linux + Windows under Wine) and the release workflow run on GitHub
