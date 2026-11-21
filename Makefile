@@ -60,7 +60,7 @@ $(OUTDIR)/gen/version.o: $(OUTDIR)/gen/version.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 FORCE:
-TESTS = t_rmw t_ea t_an t_mem t_cage t_dsp_boot t_dsp_alu t_adjust t_roms
+TESTS = t_rmw t_ea t_an t_mem t_cage t_dsp_boot t_dsp_alu t_adjust t_roms t_state
 TEST_BINS = $(addprefix $(OUTDIR)/,$(addsuffix $(EXE),$(TESTS)))
 
 HAVE_SDL ?= $(shell pkg-config --exists sdl2 2>/dev/null && echo yes)
@@ -82,7 +82,7 @@ ifeq ($(REC_LINKED),yes)
 CORE_OBJS := $(filter-out $(OUTDIR)/src/rec_none.o,$(CORE_OBJS)) $(REC_OBJS)
 endif
 
-.PHONY: all tests windows clean recomp FORCE package-linux package-appimage package-windows packages shaders-extra shaders-lola
+.PHONY: all tests windows clean recomp FORCE pkg-check package-linux package-appimage package-windows packages shaders-extra shaders-lola
 
 all: $(OUTDIR)/ragerecomp-headless$(EXE) $(if $(filter yes,$(HAVE_SDL)),$(OUTDIR)/ragerecomp$(EXE))
 	@echo "build done in $(OUTDIR)/"
@@ -188,7 +188,16 @@ PKG_LINUX = $(PKG_BASE)-Linux-x64.tar.xz
 PKG_APPIMAGE = $(PKG_BASE)-Linux-x64.AppImage
 PKG_WINDOWS = $(PKG_BASE)-Windows-x64.zip
 
-package-linux: build-pkg/ragerecomp
+# Packages match the releases: never from uncommitted changes (the version
+# would say -dirty, and the package wouldn't be what's in git), and always
+# with the GPL extra shaders, as the release workflow ships them.
+pkg-check:
+	@case '$(RR_VERSION)' in *-dirty) if [ -z '$(ALLOW_DIRTY)' ]; then \
+	    echo 'packages: the tree has uncommitted changes (version $(RR_VERSION)): commit first, or ALLOW_DIRTY=1 for a throwaway test build' >&2; \
+	    exit 1; fi;; esac
+	@test -d shaders/extra || $(MAKE) shaders-extra
+
+package-linux: pkg-check build-pkg/ragerecomp
 	RR_VERSION=$(RR_VERSION) sh tools/package.sh linux build-pkg/ragerecomp $(LNX_SDL)
 	rm -f $(PKG_LINUX) && tar -C dist -cJf $(PKG_LINUX) RageRecomp-Linux
 
@@ -208,7 +217,7 @@ build-win/ragerecomp-res.o: src/ragerecomp.rc build-win/ragerecomp.ico $(OUTDIR)
 	x86_64-w64-mingw32-windres -I build-win -DRR_VERSION_STR='\"$(RR_VERSION)\"' \
 	    -DRR_VERSION_RC=$(RR_VER_RC) -o $@ src/ragerecomp.rc
 
-package-windows: build-win/ragerecomp-res.o
+package-windows: pkg-check build-win/ragerecomp-res.o
 	$(MAKE) windows RES_OBJ=build-win/ragerecomp-res.o
 	RR_VERSION=$(RR_VERSION) sh tools/package.sh windows build-win/ragerecomp.exe $(WIN_SDL)/bin/SDL2.dll
 	rm -f $(PKG_WINDOWS) && cd dist && zip -qr9 $(notdir $(PKG_WINDOWS)) RageRecomp-Windows

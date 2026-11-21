@@ -612,7 +612,9 @@ static void load_state(void)
     char path[4400];
     slot_path(path, sizeof path, slot());
     if (!file_readable(path)) { osd_message("State %d is empty", slot()); return; }
-    if (!state_load_file(path)) { osd_message("State %d is from another version", slot()); return; }
+    int rc = state_load_file(path);
+    if (rc < 0) { osd_message("State %d is damaged", slot()); return; }
+    if (!rc) { osd_message("State %d is from another version", slot()); return; }
     state_init();                       // the history no longer applies
     ac.active = false;
     if (frame_count < (uint64_t)cfg.boot_skip_frames) frame_count = (uint64_t)cfg.boot_skip_frames;
@@ -1581,9 +1583,15 @@ int frontend_main(void)
         return 1;
     }
     {   // extra controller mappings (https://github.com/mdqinc/SDL_GameControllerDB), if present
+        // in the data folder, else where the game files are looked for (beside the program, run/, ...)
         char buf[4200];
-        snprintf(buf, sizeof buf, "%sgamecontrollerdb.txt", base_dir());
-        if (file_readable(buf)) SDL_GameControllerAddMappingsFromFile(buf);
+        const char *db = buf;
+        snprintf(buf, sizeof buf, "%sgamecontrollerdb.txt", data_dir());
+        if (!file_readable(buf)) db = find_data("gamecontrollerdb.txt", cfg.roms, buf, sizeof buf);
+        if (file_readable(db)) {
+            int n = SDL_GameControllerAddMappingsFromFile(db);
+            fprintf(stderr, "pads: %d mappings from %s\n", n, db);
+        }
     }
     attach_test_pads();
     for (int i = 0; i < SDL_NumJoysticks(); i++) {
@@ -1591,7 +1599,10 @@ int frontend_main(void)
         else log_joystick(i);
     }
     int scale = cfg.window_scale > 0 ? cfg.window_scale : 3;
-    win = video_open(PRODUCT, 320 * scale, 240 * scale);
+    // the program's version and the game version in the title, for bug reports
+    static char title[96];
+    snprintf(title, sizeof title, "%s v%s - %s", PRODUCT, rr_version, version_label((int)mach_profile->id));
+    win = video_open(title, 320 * scale, 240 * scale);
     if (!win) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
     set_window_icon(win);
     if (cfg.window_w >= 320 && cfg.window_h >= 240) {

@@ -4,9 +4,15 @@
 #
 #   tools/regress.sh PROGRAM SET [RUN_DIR] [WORK_DIR]
 #
-# PROGRAM is the headless program, SET the game set (primrage), RUN_DIR the
-# folder holding primrage.zip and tms32031.zip (default: run), WORK_DIR
-# where translated code is cached (default: a temporary folder).
+# PROGRAM is the headless program, SET the game version's MAME set
+# (primrage, primrageo or primrage20), RUN_DIR the folder holding
+# primrage.zip (and the older sets' zips) and tms32031.zip (default: run),
+# WORK_DIR where translated code is cached (default: a temporary folder).
+# The same script plays every version: "start1" is the start input of the
+# set's own layout (button 1 on the older sets).
+#
+# Expected hashes (STATE_FORMAT 8): primrage 39e17cc18b311d06,
+# primrageo c3bebbd4cfffbd2a, primrage20 c78de1915c906f64.
 #
 # Translated and interpreted runs (RR_NOREC=1 RR_NODSP=1) must print the
 # same hash, as must every compiler that builds the translated code.
@@ -19,10 +25,10 @@ if [ -z "$prog" ] || [ -z "$set_name" ]; then
     echo "usage: $0 PROGRAM SET [RUN_DIR] [WORK_DIR]" >&2
     exit 2
 fi
-if [ "$set_name" != primrage ]; then
-    echo "$0: only the primrage set is supported" >&2
-    exit 2
-fi
+case $set_name in
+primrage|primrageo|primrage20) ;;
+*) echo "$0: unknown set $set_name (primrage, primrageo or primrage20)" >&2; exit 2 ;;
+esac
 case $prog in /*) ;; *) prog=$(pwd)/$prog ;; esac
 case $run_dir in /*) ;; *) run_dir=$(pwd)/$run_dir ;; esac
 if [ -z "$work_dir" ]; then
@@ -50,5 +56,5 @@ while [ $f -le 3580 ]; do
 done
 
 cd "$work_dir"
-"$prog" --roms "$run_dir" --data-dir "$work_dir" --frames 3600 --script "$script" --hash |
+"$prog" --roms "$run_dir" --data-dir "$work_dir" --game-version "$set_name" --frames 3600 --script "$script" --hash |
     grep '^state hash'

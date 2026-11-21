@@ -787,6 +787,20 @@ void gt_state_save(uint8_t *dst) {
     memcpy(dst, gt_pal, sizeof(gt_pal));
 }
 
+// A saved picture state's values that index tables when drawn: the colour
+// and tile banks per line and the partial motion-object line. 0 if out of
+// range (a damaged file).
+int gt_state_valid(const uint8_t *src) {
+    const uint8_t *cb = src + sizeof(gt_xs) + sizeof(gt_ys), *tb = cb + sizeof(gt_cb);
+    const uint8_t *cur = tb + sizeof(gt_tb), *part = cur + 8 + sizeof(mo_vram);
+    int32_t partial = (int32_t)(((uint32_t)part[0] << 24) | ((uint32_t)part[1] << 16) |
+            ((uint32_t)part[2] << 8) | part[3]);
+    size_t i;
+    for (i = 0; i < sizeof(gt_cb); i++)
+        if (cb[i] > 0x1fu || tb[i] > 15u) return 0;
+    return cur[4] <= 0x1fu && cur[5] <= 15u && partial >= -1 && partial < 240;
+}
+
 void gt_state_load(const uint8_t *src) {
     memcpy(gt_xs, src, sizeof(gt_xs));
     src += sizeof(gt_xs);

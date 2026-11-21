@@ -87,6 +87,7 @@ cp src/third_party/lzma/README.txt "$out/licenses/LZMA-SDK-public-domain.txt"
 
 # shaders; the GPL extras are shipped as the source files they are
 cp -r shaders "$out/"
+echo "package: $(find "$out/shaders" -name '*.glslp' | wc -l) shader presets$([ -d shaders/extra ] || echo ' (no shaders/extra: run make shaders-extra)')"
 if [ -d shaders/extra ]; then
     cp tools/gpl-2.0.txt "$out/licenses/GPL-2.0-shaders-extra.txt"   # crt-guest, crt-royale, ...
     cp tools/gpl-3.0.txt "$out/licenses/GPL-3.0-shaders-extra.txt"   # xBRZ

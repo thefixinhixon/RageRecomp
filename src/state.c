@@ -170,6 +170,23 @@ static void dsp_revalidate(void) {
     rrm->dsp_gen++;
 }
 
+// Values in a state that index tables: a damaged file (or one edited by
+// hand) is refused before anything is restored, instead of reading or
+// writing outside them later.
+static int blob_sane(const uint8_t *src) {
+    const uint8_t *cg = src + 16 + SP_CPU + SP_DSP + SP_RAM + SP_BANK + SP_CR +
+            SP_DRAM + SP_DIRAM + SP_DIO;
+    const uint8_t *mc = cg + 580 + SP_EE + 4 + SP_XGA;
+    uint32_t fifo = get32(cg + 64), i;
+    c31_t dsp;
+    for (i = 0; i < 4; i++)                             // CAGE FIFO heads and tails
+        if (((fifo >> (i * 8)) & 0xffu) >= 64) return 0;
+    if (get32(mc + 28) >= GT_LINES) return 0;           // scanline
+    memcpy(&dsp, src + 16 + SP_CPU, sizeof dsp);
+    if (dsp.dcount < -1 || dsp.dcount > 3) return 0;    // delayed-branch countdown
+    return gt_state_valid(mc + 104);
+}
+
 int machine_state_load(const uint8_t *src, uint32_t size) {
     const uint8_t *p = src;
     uint32_t want;
@@ -180,6 +197,7 @@ int machine_state_load(const uint8_t *src, uint32_t size) {
     if (get32(p + 8) != want) return -1;
     if (!mach.rom || get32(p + 12) != rom_crc())
         return -1;
+    if (!blob_sane(src)) return -2;
     p += 16;
     memcpy(&mach.cpu, p, SP_CPU);
     p += SP_CPU;
@@ -294,15 +312,21 @@ int state_load_file(const char *path) {
     uint32_t size;
     uint8_t *blob;
     FILE *f = fopen(path, "rb");
-    int ok;
+    int ok, rc = -1;
     if (!f) return 0;
     machine_state_size(&size);
     blob = (uint8_t *)malloc(size);
-    ok = blob && fread(blob, 1, size, f) == size;
+    // exactly one state: a short or longer file is damaged
+    ok = blob && fread(blob, 1, size, f) == size && fgetc(f) == EOF;
     fclose(f);
-    if (ok) ok = machine_state_load(blob, size) == 0;
+    if (ok) rc = machine_state_load(blob, size);
     free(blob);
-    return ok;
+    if (!ok || rc == -2) {
+        // the header names this build and game: if it matches, the rest is damaged
+        fprintf(stderr, "state: %s is damaged or not a save state\n", path);
+        return -1;
+    }
+    return rc == 0;
 }
 
 uint64_t state_hash(void) {

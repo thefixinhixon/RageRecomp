@@ -1100,7 +1100,7 @@ int main(int argc, char **argv) {
         headless_game_code();
         machine_reset();                    // the DSP's code was read by booting it
         mach.in.b0 = mach.in.b1 = mach.in.b3 = 0xff;
-        if (load_path && !state_load_file(load_path)) {
+        if (load_path && state_load_file(load_path) != 1) {
             fprintf(stderr, "%s: cannot load state\n", load_path);
             return 1;
         }

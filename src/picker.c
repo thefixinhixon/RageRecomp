@@ -2,6 +2,7 @@
 #include "picker.h"
 #include "icon.h"
 #include "osd.h"
+#include "version.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -67,6 +68,14 @@ static void glyphs(uint32_t *px, int pw, int ph, int x, int y, const char *s, si
 }
 
 
+// "RageRecomp v1.2.0": the program's version in the window title.
+static const char *versioned_title(void)
+{
+    static char t[64];
+    snprintf(t, sizeof t, "%s v%s", PRODUCT, rr_version);
+    return t;
+}
+
 bool picker_message(const char *title, const char *text)
 {
     static const char footer[] = "Enter or Esc to close";
@@ -90,6 +99,7 @@ bool picker_message(const char *title, const char *text)
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) return false;
     int scale = pw * 2 <= 1600 ? 2 : 1;                  // doubled when it fits a laptop screen
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    if (!strcmp(title, PRODUCT)) title = versioned_title();
     SDL_Window *win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, pw * scale, ph * scale, SDL_WINDOW_RESIZABLE);
     SDL_Renderer *r = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
     if (!r && win) r = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
@@ -178,6 +188,9 @@ static void welcome_draw(const char *folder, const char *alt, const char *status
     if (*status) centred(WH - 96, status, status_rgb, 2);
     centred(WH - 60, "O  open the folder     Enter  check again     Esc  quit", 0x909090, 2);
     centred(WH - 34, "File names and versions: see README.md", 0x606060, 2);
+    char ver[64];
+    snprintf(ver, sizeof ver, "PROGRAM VERSION %s", rr_version);
+    centred(WH - 14, ver, 0x505050, 1);
 }
 
 // Make the folder (dir has no trailing slash) and show it in the file manager.
@@ -195,7 +208,7 @@ int picker_welcome(const char *folder, const char *alt, bool (*found)(void))
 {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) return -1;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-    SDL_Window *win = SDL_CreateWindow(PRODUCT, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WW, WH, SDL_WINDOW_RESIZABLE);
+    SDL_Window *win = SDL_CreateWindow(versioned_title(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WW, WH, SDL_WINDOW_RESIZABLE);
     SDL_Renderer *r = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
     if (!r && win) r = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
     SDL_Texture *tex = r ? SDL_CreateTexture(r, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, WW, WH) : NULL;

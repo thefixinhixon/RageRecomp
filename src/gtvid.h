@@ -37,3 +37,4 @@ void gt_render(void);
 uint32_t gt_state_size(void);
 void gt_state_save(uint8_t *dst);
 void gt_state_load(const uint8_t *src);
+int gt_state_valid(const uint8_t *src);   // 0: values out of range (damaged)

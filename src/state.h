@@ -10,8 +10,10 @@
 #define STATE_FORMAT 8u
 uint32_t state_compat_id(void);
 
-// Save states as files (the whole machine). 1 on success; loading refuses
-// states from other builds or game versions.
+// Save states as files (the whole machine). 1 on success. Loading returns
+// 0 for a missing file or a state from another build or game version, and
+// -1 for a damaged file (wrong length, values out of range); either way the
+// machine is left as it was.
 int state_save_file(const char *path);
 int state_load_file(const char *path);
 // Hash of the whole machine state, for determinism tests.
