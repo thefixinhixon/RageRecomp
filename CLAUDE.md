@@ -309,7 +309,9 @@ read with `getenv` in `src/` (grep them for details).
 - Verified: 305 unit tests pass on Linux and under Wine; Linux + Windows
   builds clean; `make packages` built and the AppImage (Zig, 83 s first
   launch) and Windows zip (under Wine, TinyCC) both start and play.
-- CI and release workflows written but never executed on GitHub Actions.
+- CI (Linux + Windows under Wine) and the release workflow run on GitHub
+  Actions; v1.0.0 was built there, and its downloaded AppImage (Zig) and
+  Windows zip (Wine, TinyCC) both gave the regression hash.
 
 ## Style
 
