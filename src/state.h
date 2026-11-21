@@ -7,7 +7,7 @@
 // Must differ between builds that emulate differently: bump it on any
 // emulation change or state layout change. (The translators don't count:
 // translated code emulates exactly as the interpreters do.)
-#define STATE_FORMAT 7u
+#define STATE_FORMAT 8u
 uint32_t state_compat_id(void);
 
 // Save states as files (the whole machine). 1 on success; loading refuses

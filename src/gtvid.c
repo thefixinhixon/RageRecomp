@@ -360,7 +360,10 @@ static void mo_draw(uint16_t *bm, int code, uint32_t palette, int sx, int sy,
     else if (ey < 0) return;
     row_start = data;
     for (y = sy; y <= ey; y++, sourcey += dy) {
-        uint16_t *dest = bm + (uint32_t)y * MO_VRAM_W + (uint32_t)sx;
+        // Clipped rows count columns (sx may be negative: a pointer there
+        // would be outside the buffer, and `bm + row + (uint32_t)sx` once
+        // pointed 4 GB past it, so objects entering at the left vanished).
+        uint16_t *rowp = bm + (uint32_t)y * MO_VRAM_W;
         int sourcex = dx / 2, rle_end = 0, entry, ec;
         uint32_t base;
         int target = sourcey >> 16;
@@ -371,6 +374,7 @@ static void mo_draw(uint16_t *bm, int code, uint32_t palette, int sx, int sy,
         base = row_start;
         ec = rle_word(base++);
         if (!xclip) {
+            uint16_t *dest = rowp + sx;
             for (entry = 0; entry < ec; entry++) {
                 uint32_t wv = rle_word(base++);
                 int count, value;
@@ -398,25 +402,25 @@ static void mo_draw(uint16_t *bm, int code, uint32_t palette, int sx, int sy,
                 }
             }
         } else {
-            uint16_t *end = bm + (uint32_t)y * MO_VRAM_W + (uint32_t)ex;
-            int skipped = skip;
-            for (entry = 0; entry < ec && dest <= end; entry++) {
+            // MAME's clipped loop, with column `col` for its dest pointer.
+            int col = sx, skipped = skip;
+            for (entry = 0; entry < ec && col <= ex; entry++) {
                 uint32_t wv = rle_word(base++);
                 int count = info->table[wv & 0xff];
                 int value = count & 0xff;
                 rle_end += (count & 0xff00) << 8;
                 if (skipped) {
                     while (skipped && sourcex < rle_end)
-                        dest++, sourcex += dx, skipped--;
+                        col++, sourcex += dx, skipped--;
                     if (skipped) goto mo_next3;
                 }
                 if (value) {
                     value |= (int)palette;
-                    while (sourcex < rle_end && dest <= end)
-                        *dest++ = (uint16_t)value, sourcex += dx;
+                    while (sourcex < rle_end && col <= ex)
+                        rowp[col++] = (uint16_t)value, sourcex += dx;
                 } else {
                     while (sourcex < rle_end)
-                        dest++, sourcex += dx;
+                        col++, sourcex += dx;
                 }
             mo_next3:
                 count = info->table[wv >> 8];
@@ -424,16 +428,16 @@ static void mo_draw(uint16_t *bm, int code, uint32_t palette, int sx, int sy,
                 rle_end += (count & 0xff00) << 8;
                 if (skipped) {
                     while (skipped && sourcex < rle_end)
-                        dest++, sourcex += dx, skipped--;
+                        col++, sourcex += dx, skipped--;
                     if (skipped) goto mo_next4;
                 }
                 if (value) {
                     value |= (int)palette;
-                    while (sourcex < rle_end && dest <= end)
-                        *dest++ = (uint16_t)value, sourcex += dx;
+                    while (sourcex < rle_end && col <= ex)
+                        rowp[col++] = (uint16_t)value, sourcex += dx;
                 } else {
                     while (sourcex < rle_end)
-                        dest++, sourcex += dx;
+                        col++, sourcex += dx;
                 }
             mo_next4:;
             }

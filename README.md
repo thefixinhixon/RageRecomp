@@ -236,6 +236,9 @@ tag builds them on GitHub Actions into a draft release.
 
 ## Status and known issues
 
+- Builds before this one dropped stage scenery drawn as large sprites
+  (ice cliffs, Stonehenge's stones, ...) whenever it reached past the left
+  edge of the screen, so it vanished and reappeared as the fight moved.
 - Builds before this one played no music (effects and voices only): a
   sound-processor instruction changed flags it shouldn't, which stalled
   the music sequencer. The sound board also ran 3% fast. Both are fixed;

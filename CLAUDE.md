@@ -178,7 +178,7 @@ state hash:
     tools/regress.sh PROGRAM SET [RUN_DIR] [WORK_DIR]
 
 The hash is the same for translated and interpreted runs, for every
-compiler and for linked-in code; current value (primrage, STATE_FORMAT 7): `ad20192391a76fb5`. The state no longer folds in the
+compiler and for linked-in code; current value (primrage, STATE_FORMAT 8): `39e17cc18b311d06`. The state no longer folds in the
 translator version (translated = interpreted), and leaves out the DAC
 output queue (host audio, not emulated state), so playing or recording
 sound doesn't change it. Rewind, run-ahead and netplay rollback
@@ -257,7 +257,11 @@ read with `getenv` in `src/` (grep them for details).
   the same regression hash; so do gcc, clang, Zig and TinyCC modules,
   TinyCC under Wine, and the linked-in build.
 - GT video, CAGE audio path, protection, EEPROM (persisted per set): from
-  MAME. Music and effects checked against MAME 0.289 (flatpak; its DSP
+  MAME. Stage scenery (ice cliffs, Stonehenge's stones) is large RLE
+  motion objects; until STATE_FORMAT 8 any object starting left of the
+  screen was dropped (a pointer offset by `(uint32_t)sx`). Checked against
+  MAME: same object lists at a stage edge, same picture. Attract frames
+  match MAME pixel for pixel until the demo fights diverge (frame ~2070). Music and effects checked against MAME 0.289 (flatpak; its DSP
   boot set is named `tms320c31.zip`) on a scripted coin-up: same command
   stream from the 68K, same music cues and timing, similar levels. The
   attract is silent in both: the operator setting "attract volume"
@@ -293,8 +297,8 @@ read with `getenv` in `src/` (grep them for details).
 - Game versions: all three played to a fight (primrageo/primrage20 start
   with button 1), each with zero interpreted instructions and translated
   = interpreted hashes over the scripted 3600 frames (`--script` as in
-  regress.sh; primrageo `b0ab9b8bacc13b49`, primrage20 `dca54d1ea0e945bb`
-  at STATE_FORMAT 7). Switching versions
+  regress.sh; primrageo `c3bebbd4cfffbd2a`, primrage20 `c78de1915c906f64`
+  at STATE_FORMAT 8). Switching versions
   in the menu restarts the program on the new set. ROM files are found by
   name with the right CRC, else by CRC (merged sets), else by name.
 - Verified: 298 unit tests pass on Linux and under Wine; Linux + Windows
